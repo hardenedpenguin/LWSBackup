@@ -1,6 +1,6 @@
 # LWSBackup
 
-A lightweight Bash-based backup and restore utility designed for:
+LWSBackup is a lightweight backup and disaster recovery utility designed for:
 
 - HamVoIP nodes
 - AllStarLink systems
@@ -9,41 +9,118 @@ A lightweight Bash-based backup and restore utility designed for:
 - Arch Linux ARM systems
 - General homelab environments
 
-Built to work even on older systems with minimal dependencies.
-
-The project focuses on:
-
-- Simple operation
-- Automatic restore kit generation
-- Portable backups
-- SSH-friendly menu systems
-- No database requirements
-- No Python requirements
+Built entirely in Bash for maximum compatibility with older Linux systems and low-resource devices.
 
 ---
 
 # Features
 
-- Full backup creation
+## Backup Engine
+
+- Full backup ZIP creation
 - Automatic restore kit generation
-- Self-contained restore scripts
+- Portable disaster recovery packages
+- SHA256 checksum generation
 - Automatic dependency checking
-- Automatic folder creation
-- Backup rotation cleanup
-- SHA256 verification
-- Root privilege checking
-- Compatible with:
-  - apt
-  - yum
-  - pacman
-- HamVoIP friendly
-- Bash 4.x compatible
-- Lightweight
-- Designed for terminal/SSH use
+- Automatic backup rotation cleanup
+- Automatic log rotation cleanup
+- Configurable backup naming
+- Custom backup targets
+- Multi-profile support
 
 ---
 
-# Current Backup Targets
+## Restore Engine
+
+- Self-contained restore kits
+- Automatic `.bak` safety backups before overwrite
+- Restore dry-run mode
+- Safe restore process
+- Portable restore environment
+- Restore logging
+
+---
+
+## User Interface
+
+- Dialog-based terminal UI
+- SSH-friendly menu system
+- HamVoIP compatible
+- No GUI environment required
+- Automatic text fallback if `dialog` is unavailable
+
+---
+
+## Automation
+
+- Cron scheduling setup
+- Optional FTP upload support
+- Persistent configuration system
+- Automatic folder creation
+
+---
+
+# Supported Systems
+
+Tested on:
+
+- HamVoIP
+- Arch Linux ARM
+- Debian
+- Raspberry Pi systems
+
+Should also work on:
+
+- Ubuntu
+- Proxmox containers
+- Mini PCs
+- Generic Linux systems
+
+---
+
+# Requirements
+
+The script automatically installs missing dependencies when possible.
+
+Required tools:
+
+```text
+zip
+unzip
+sha256sum
+dialog
+curl (optional for FTP)
+```
+
+Supported package managers:
+
+```text
+apt-get
+yum
+pacman
+```
+
+---
+
+# Folder Structure
+
+LWSBackup automatically creates:
+
+```text
+/LWS_Backup/
+│
+├── backups/
+├── restore_kits/
+├── logs/
+├── scripts/
+├── profiles/
+├── configs/
+└── tmp/
+```
+
+---
+
+# Default Backup Targets
 
 By default the script backs up:
 
@@ -53,6 +130,8 @@ By default the script backs up:
 /var/spool/cron/root
 ```
 
+Additional folders and files can be added through the setup menu.
+
 ---
 
 # Backup Structure
@@ -60,17 +139,23 @@ By default the script backs up:
 Generated backup ZIP:
 
 ```text
-Backup_HOSTNAME_DATE.zip
+Backup_HOSTNAME_YYYYMMDD-HHMMSS.zip
 │
 ├── HTTP/
 ├── Asterisk/
-└── root
+├── root
+├── custom/
+└── system/
 ```
+
+---
+
+# Restore Kit Structure
 
 Generated restore kit ZIP:
 
 ```text
-Restore_kit_HOSTNAME_DATE.zip
+Restore_kit_HOSTNAME_YYYYMMDD-HHMMSS.zip
 │
 └── Restore_kit/
     │
@@ -78,28 +163,13 @@ Restore_kit_HOSTNAME_DATE.zip
     │   └── Backup_latest.zip
     │
     ├── scripts/
-    │   └── backup_v10.sh
+    │   └── backup_v11.sh
     │
     ├── restore.sh
     ├── restore_config.conf
     ├── README_RESTORE.txt
-    └── sha256sums.txt
-```
-
----
-
-# Folder Structure Created
-
-The script automatically creates:
-
-```text
-/LWS_Backup/
-│
-├── backups/
-├── restore_kits/
-├── logs/
-├── scripts/
-└── tmp/
+    ├── sha256sums.txt
+    └── logs/
 ```
 
 ---
@@ -116,13 +186,25 @@ cd LWSBackup
 Make executable:
 
 ```bash
-chmod +x backup_v10.sh
+chmod +x backup_v11.sh
 ```
 
-Run:
+Run setup:
 
 ```bash
-sudo ./backup_v10.sh
+sudo ./backup_v11.sh --setup
+```
+
+Launch menu:
+
+```bash
+sudo ./backup_v11.sh --menu
+```
+
+Run backup directly:
+
+```bash
+sudo ./backup_v11.sh --run
 ```
 
 ---
@@ -147,19 +229,25 @@ from anywhere.
 
 # Restore Process
 
-Extract the generated restore kit:
+Extract the restore kit:
 
 ```bash
 unzip Restore_kit_latest.zip
 ```
 
-Enter the restore folder:
+Enter the restore directory:
 
 ```bash
 cd Restore_kit
 ```
 
-Run restore:
+Run dry-run restore:
+
+```bash
+sudo ./restore.sh --dry-run
+```
+
+Run actual restore:
 
 ```bash
 sudo ./restore.sh
@@ -173,91 +261,77 @@ sudo reboot
 
 ---
 
-# Dependency Handling
+# FTP Support
 
-The script automatically installs missing dependencies when possible.
+Optional FTP upload support is available.
 
-Required tools:
+Features:
 
-```text
-zip
-unzip
-sha256sum
-```
-
-Package managers supported:
-
-```text
-apt-get
-yum
-pacman
-```
+- FTP upload toggle
+- Saved FTP profiles
+- Automatic upload after backup
+- Local backup retention
+- FTP disabled by default until configured
 
 ---
 
-# Backup Rotation
+# Cron Scheduling
 
-Currently keeps:
+The setup menu can automatically configure cron jobs.
 
-```text
-2 backups
-2 restore kits
-```
-
-Older backups are automatically deleted.
-
----
-
-# Compatibility
-
-Tested on:
-
-```text
-HamVoIP
-Arch Linux ARM
-Debian
-Raspberry Pi systems
-```
-
-Should also work on:
-
-- Ubuntu
-- Proxmox containers
-- Mini PCs
-- Generic Linux systems
-
----
-
-# Security Notes
-
-- Script must run as root.
-- Restore overwrites live system files.
-- Always verify backups before relying on them.
-- Restore kits include SHA256 verification.
-
----
-
-# Planned Features
-
-- Dialog-based menu UI
-- FTP upload support
-- Cron scheduling setup
-- Custom backup targets
-- Safer restore with automatic `.bak` creation
-- Dry-run restore mode
-- Configurable backup naming
-- Better logging cleanup
-- Multi-node backup profiles
-
----
-
-# Example Cron Job
+Example:
 
 ```cron
-21 18 * * 5 /usr/local/sbin/lws-backup
+21 18 * * 5 /usr/local/sbin/lws-backup --run
 ```
 
 Runs every Friday at 6:21 PM.
+
+---
+
+# Safety Features
+
+- Root permission checking
+- Automatic `.bak` file creation during restore
+- SHA256 verification
+- Dry-run restore mode
+- Temporary workspace cleanup
+- Lock file support
+- Backup retention cleanup
+- Log retention cleanup
+
+---
+
+# Compatibility Notes
+
+LWSBackup is intentionally designed to support older systems commonly found in:
+
+- HamVoIP nodes
+- Older Raspberry Pi installations
+- Embedded Linux systems
+- Legacy AllStarLink systems
+
+The project avoids requiring:
+
+- Python
+- Docker
+- Databases
+- Modern desktop environments
+- Heavy dependencies
+
+---
+
+# Planned Future Features
+
+- SFTP support
+- SCP/RSYNC support
+- Encrypted backups
+- Incremental backups
+- Backup verification testing
+- Multi-node remote management
+- Web dashboard
+- Email notifications
+- Telegram notifications
 
 ---
 
@@ -271,6 +345,11 @@ MIT License
 
 WROG208 / N4ASS
 
+Website:
+https://www.lonewolfsystem.org
+
+GitHub:
+https://github.com/WROG208/LWSBackup
 Website:
 https://www.lonewolfsystem.org
 
