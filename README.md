@@ -3,18 +3,18 @@ Easy backup and restore script that backups esential files on hamvoip or any lin
 
 reusable utility for:
 
-HamVoIP
-AllStar nodes
-Debian repeaters
-Raspberry Pis
-mini servers
-general homelab backups
+HamVoIP, 
+, AllStar nodes
+, Debian repeaters
+, Raspberry Pis
+, mini servers
+, general homelab backups
 
 especially with:
 
-menu UI
-restore mode
-cron integration
+, menu UI
+, restore mode
+, cron integration
 FTP optional
-dependency auto-install
-config persistence
+, dependency auto-install
+, config persistence
