@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/LWSBackup.jpg" width="180">
+  <img src="images/LWSBackup.jpg" width="300">
 </p>
 # LWSBackup Desktop
 
