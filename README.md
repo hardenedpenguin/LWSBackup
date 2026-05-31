@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="images/LWSBackup.jpg" width="180">
+</p>
 # LWSBackup Desktop
 
 LWSBackup Desktop is a Windows application that provides a simple graphical interface for running LWSBackup on Raspberry Pi, Allstar, HamVOIP, Debian, and other Linux-based systems.
