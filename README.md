@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/LWSBackup.jpg" width="600">
+  <img src="images/LWSBackup.V1.0.4.png" width="600">
 </p>
 
 
