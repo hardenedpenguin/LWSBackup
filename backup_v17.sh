@@ -399,13 +399,125 @@ list_targets_text() {
     awk -F'|' '/^[[:space:]]*#/ {next} NF >= 4 {printf "- %-4s %-30s -> %-18s restore: %s\n", $1, $2, $3, $4}' "$TARGETS_FILE"
 }
 
+list_targets_for_removal() {
+    awk -F'|' '/^[[:space:]]*#/ {next} NF >= 4 {printf "%d) %-4s %s\n", ++i, $1, $2}' "$TARGETS_FILE"
+}
+
+count_targets() {
+    awk -F'|' '/^[[:space:]]*#/ {next} NF >= 4 {++c} END {print c+0}' "$TARGETS_FILE"
+}
+
+target_exists() {
+    type="$1"
+    src="$2"
+    awk -F'|' -v t="$type" -v s="$src" '
+        /^[[:space:]]*#/ {next}
+        NF >= 4 && $1 == t && $2 == s {found=1}
+        END {exit found ? 0 : 1}
+    ' "$TARGETS_FILE"
+}
+
+zipname_exists() {
+    zipname="$1"
+    awk -F'|' -v z="$zipname" '
+        /^[[:space:]]*#/ {next}
+        NF >= 4 && $3 == z {found=1}
+        END {exit found ? 0 : 1}
+    ' "$TARGETS_FILE"
+}
+
+validate_target_path() {
+    type="$1"
+    src="$2"
+    case "$type" in
+        DIR)
+            if [ ! -d "$src" ]; then
+                msgbox "Path Not Found" "Directory not found:\n$src\n\nTarget was not added."
+                return 1
+            fi
+            ;;
+        FILE)
+            if [ ! -f "$src" ]; then
+                msgbox "Path Not Found" "File not found:\n$src\n\nTarget was not added."
+                return 1
+            fi
+            ;;
+        *)
+            msgbox "Invalid Type" "Target type must be DIR or FILE."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 add_target() {
-    type="$1"; src="$2"; zipname="$3"; dest="$4"
+    type="$1"
+    src="$2"
+    zipname="$3"
+    dest="$4"
+
     [ -z "$src" ] && return 1
+    case "$type" in
+        DIR|FILE) ;;
+        *) return 1 ;;
+    esac
+    if target_exists "$type" "$src"; then
+        msgbox "Duplicate Target" "This target already exists:\n$type | $src"
+        return 1
+    fi
+    validate_target_path "$type" "$src" || return 1
+
     [ -z "$zipname" ] && zipname="$(basename "$src")"
     [ -z "$dest" ] && dest="$src"
     zipname="$(sanitize_name "$zipname")"
+    [ -z "$zipname" ] && zipname="$(basename "$src")"
+    if zipname_exists "$zipname"; then
+        msgbox "Duplicate ZIP Name" "Another target already uses ZIP name:\n$zipname\n\nChoose a different ZIP name."
+        return 1
+    fi
+
     echo "${type}|${src}|${zipname}|${dest}" >> "$TARGETS_FILE"
+    chmod 600 "$TARGETS_FILE" 2>/dev/null
+}
+
+remove_target_by_index() {
+    index="$1"
+    tmp="$TMP_DIR/targets_edit.$$"
+    awk -F'|' -v n="$index" '
+        /^[[:space:]]*#/ {print; next}
+        NF < 4 {print; next}
+        {++i; if (i != n) print}
+    ' "$TARGETS_FILE" > "$tmp" || return 1
+    mv "$tmp" "$TARGETS_FILE"
+    chmod 600 "$TARGETS_FILE"
+}
+
+prompt_add_target() {
+    type="$1"
+    label="$2"
+    src="$(inputbox "Add $label" "Enter path to back up:" "")" || return
+    zipname="$(inputbox "ZIP Name" "Name inside the backup ZIP:" "$(basename "$src")")" || return
+    dest="$(inputbox "Restore Destination" "Restore destination path:" "$src")" || return
+    if add_target "$type" "$src" "$zipname" "$dest"; then
+        msgbox "Added" "$label target added."
+    fi
+}
+
+remove_target_menu() {
+    list="$(list_targets_for_removal)"
+    max="$(count_targets)"
+    [ -z "$list" ] || [ "$max" -eq 0 ] && { msgbox "Remove Target" "No targets to remove."; return; }
+    pick="$(inputbox "Remove Target" "Enter target number to remove (1-$max):\n\n$list" "")" || return
+    pick="$(clean_number "$pick" "")"
+    [ -z "$pick" ] && return
+    if [ "$pick" -lt 1 ] || [ "$pick" -gt "$max" ]; then
+        msgbox "Invalid Selection" "Enter a number from 1 to $max."
+        return
+    fi
+    if yesno "Confirm Remove" "Remove target #$pick?"; then
+        remove_target_by_index "$pick"
+        msgbox "Removed" "Target removed."
+    fi
 }
 
 targets_help_text() {
@@ -444,16 +556,15 @@ RESTORE_DESTINATION is where restore.sh will put it back.
 
 Recommended way:
 
-  Main Menu -> Backup Targets -> Add folder target
-  Main Menu -> Backup Targets -> Add file target
+  Main Menu -> Backup Targets -> Add folder/file target
+  Main Menu -> Backup Targets -> Remove target
 
-That avoids typing the pipe-separated format manually, because typos are tiny demons.
+That avoids typing the pipe-separated format manually.
 EOHELP
 }
 
 show_targets_help() {
-    text="$(targets_help_text)"
-    msgbox "Backup Target Help" "$text"
+    msgbox "Backup Target Help" "$(targets_help_text)"
 }
 
 edit_targets_file() {
@@ -463,29 +574,48 @@ edit_targets_file() {
 
 configure_targets_menu() {
     while true; do
-        current="$(list_targets_text)"; [ -z "$current" ] && current="No targets configured."
+        current="$(list_targets_text)"
+        [ -z "$current" ] && current="No targets configured."
         if check_dialog; then
             setup_dialog_theme
-            choice="$(dialog_cmd --title "Backup Targets" --menu "Current targets:\n\n$current\n\nChoose an action:" 24 84 8 \
-                "1" "Add folder target" "2" "Add file target" "3" "Show help / instructions" "4" "Edit targets.conf manually" "5" "Reset to default targets" "6" "Show targets file path" "0" "Back" \
+            choice="$(dialog_cmd --title "Backup Targets" --menu "Current targets:\n\n$current\n\nChoose an action:" 24 84 9 \
+                "1" "Add folder target" \
+                "2" "Add file target" \
+                "3" "Remove target" \
+                "4" "Show help / instructions" \
+                "5" "Edit targets.conf manually" \
+                "6" "Reset to default targets" \
+                "7" "Show targets file path" \
+                "0" "Back" \
                 3>&1 1>&2 2>&3)"
-            rc=$?; clear_screen; [ $rc -eq 0 ] || return
+            rc=$?
+            clear_screen
+            [ $rc -eq 0 ] || return
         else
-            echo "$current"; echo "1) Add folder target"; echo "2) Add file target"; echo "3) Show help / instructions"; echo "4) Edit targets.conf manually"; echo "5) Reset defaults"; echo "6) Show path"; echo "0) Back"; read choice
+            echo "$current"
+            echo "1) Add folder target"
+            echo "2) Add file target"
+            echo "3) Remove target"
+            echo "4) Show help / instructions"
+            echo "5) Edit targets.conf manually"
+            echo "6) Reset defaults"
+            echo "7) Show path"
+            echo "0) Back"
+            read choice
         fi
         case "$choice" in
-            1) src="$(inputbox "Add Folder" "Enter folder path to back up:" "")" || continue
-               zipname="$(inputbox "ZIP Folder Name" "Name inside the backup ZIP:" "$(basename "$src")")" || continue
-               dest="$(inputbox "Restore Destination" "Restore destination path:" "$src")" || continue
-               add_target "DIR" "$src" "$zipname" "$dest"; msgbox "Added" "Folder target added." ;;
-            2) src="$(inputbox "Add File" "Enter file path to back up:" "")" || continue
-               zipname="$(inputbox "ZIP File Name" "Name inside the backup ZIP:" "$(basename "$src")")" || continue
-               dest="$(inputbox "Restore Destination" "Restore destination path:" "$src")" || continue
-               add_target "FILE" "$src" "$zipname" "$dest"; msgbox "Added" "File target added." ;;
-            3) show_targets_help ;;
-            4) edit_targets_file ;;
-            5) if yesno "Reset Targets" "Reset backup targets to HamVOIP/AllStar defaults?"; then create_legacy_default_targets; msgbox "Reset" "Targets reset to legacy defaults."; fi ;;
-            6) msgbox "Targets File" "$TARGETS_FILE" ;;
+            1) prompt_add_target "DIR" "Folder" ;;
+            2) prompt_add_target "FILE" "File" ;;
+            3) remove_target_menu ;;
+            4) show_targets_help ;;
+            5) edit_targets_file ;;
+            6)
+                if yesno "Reset Targets" "Reset backup targets to HamVOIP/AllStar defaults?"; then
+                    create_legacy_default_targets
+                    msgbox "Reset" "Targets reset to legacy defaults."
+                fi
+                ;;
+            7) msgbox "Targets File" "$TARGETS_FILE" ;;
             0) return ;;
         esac
     done
@@ -526,7 +656,7 @@ backup_targets() {
     echo_log "Creating backup workspace..."
     mkdir -p "$WORK_DIR" || fail_exit "Could not create work directory"
     echo_log "Collecting backup targets..."
-    [ ! -f "$TARGETS_FILE" ] && create_default_targets_if_missing
+    [ ! -f "$TARGETS_FILE" ] && create_empty_targets_if_missing
     while IFS='|' read type src zipname dest; do
         case "$type" in ""|\#*) continue ;; esac
         [ -z "$src" ] && continue
