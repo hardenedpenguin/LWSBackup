@@ -7,10 +7,8 @@
 # LWSBackup stores backup targets in:
 #   /LWS_Backup/config/targets.conf
 #
-# Default targets created on first run:
-#   DIR | /srv/http             | HTTP     | /srv/http
-#   DIR | /etc/asterisk         | Asterisk | /etc/asterisk
-#   FILE| /var/spool/cron/root  | root     | /var/spool/cron/root
+# Default targets are optional during setup (HamVOIP/AllStar paths offered in wizard).
+# Empty targets.conf is created on first run; add targets via --setup or --menu.
 #
 # targets.conf format:
 #   TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
@@ -220,9 +218,20 @@ EOC
     chmod 600 "$FTP_FILE"
 }
 
-create_default_targets_if_missing() {
+create_empty_targets_if_missing() {
     if [ ! -f "$TARGETS_FILE" ]; then
         cat > "$TARGETS_FILE" <<'EOT'
+# LWSBackup target list
+# Format: TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
+# TYPE: DIR or FILE
+# Add targets from: sudo lws-backup --menu -> Backup Targets
+EOT
+        chmod 600 "$TARGETS_FILE"
+    fi
+}
+
+create_legacy_default_targets() {
+    cat > "$TARGETS_FILE" <<'EOT'
 # LWSBackup target list
 # Format: TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
 # TYPE: DIR or FILE
@@ -230,8 +239,7 @@ DIR|/srv/http|HTTP|/srv/http
 DIR|/etc/asterisk|Asterisk|/etc/asterisk
 FILE|/var/spool/cron/root|root|/var/spool/cron/root
 EOT
-        chmod 600 "$TARGETS_FILE"
-    fi
+    chmod 600 "$TARGETS_FILE"
 }
 
 initialize_defaults() {
@@ -240,7 +248,7 @@ initialize_defaults() {
     sanitize_runtime_settings
     [ -f "$CONFIG_FILE" ] || save_config
     [ -f "$FTP_FILE" ] || save_ftp_config
-    create_default_targets_if_missing
+    create_empty_targets_if_missing
 }
 
 # ---------------- Dependencies ---------------- #
@@ -404,11 +412,13 @@ targets_help_text() {
     cat <<'EOHELP'
 Backup targets tell LWSBackup what to save and where to restore it later.
 
-Current default targets:
+Current optional HamVOIP/AllStar default targets:
 
   /srv/http
   /etc/asterisk
   /var/spool/cron/root
+
+These are offered during first-time setup. You are not required to use them.
 
 Targets are saved in:
 
@@ -474,7 +484,7 @@ configure_targets_menu() {
                add_target "FILE" "$src" "$zipname" "$dest"; msgbox "Added" "File target added." ;;
             3) show_targets_help ;;
             4) edit_targets_file ;;
-            5) if yesno "Reset Targets" "Reset backup targets to defaults?"; then rm -f "$TARGETS_FILE"; create_default_targets_if_missing; msgbox "Reset" "Targets reset."; fi ;;
+            5) if yesno "Reset Targets" "Reset backup targets to HamVOIP/AllStar defaults?"; then create_legacy_default_targets; msgbox "Reset" "Targets reset to legacy defaults."; fi ;;
             6) msgbox "Targets File" "$TARGETS_FILE" ;;
             0) return ;;
         esac
@@ -842,7 +852,12 @@ first_run_setup() {
     check_root; create_folders; initialize_defaults; install_dialog_if_possible; install_self
     msgbox "LWSBackup v$VERSION" "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
     configure_general_menu
-    yesno "Backup Targets" "Do you want to add custom folders or files now?\n\nIf No, defaults remain:\n/srv/http\n/etc/asterisk\n/var/spool/cron/root" && configure_targets_menu
+    if yesno "Default Targets" "Install default HamVOIP/AllStar targets?\n\n/srv/http\n/etc/asterisk\n/var/spool/cron/root\n\nIf No, add targets manually later."; then
+        create_legacy_default_targets
+    fi
+    if yesno "Backup Targets" "Do you want to add more custom folders or files now?"; then
+        configure_targets_menu
+    fi
     yesno "FTP" "Do you want to configure FTP upload now?\n\nIf skipped, FTP remains disabled but the template config stays available." && configure_ftp_menu || { FTP_ENABLED="no"; save_ftp_config; }
     yesno "Cron" "Do you want to create an automatic cron schedule now?" && configure_cron_menu
     msgbox "Setup Complete" "Setup is complete.\n\nRun now:\n/usr/local/sbin/lws-backup --run\n\nOpen menu:\n/usr/local/sbin/lws-backup --menu"
