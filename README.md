@@ -22,14 +22,15 @@ Instead of manually opening SSH sessions and downloading backup archives, LWSBac
 - Should work in other Linux Systems you will have to try.
   
 #
-Hardcoded backup folders specifically for GMRSHub and Allstarlink. Allstarlink V3 i dont use so no idea if these folders are still relevant to that version.
-Will take out the hardcoded directories in future update
+Optional HamVOIP / AllStarLink default targets (offered during `lws-backup --setup`, not applied automatically):
 
 | Type      | Path                   | Purpose                                                 |
 | --------- | ---------------------- | ------------------------------------------------------- |
 | Directory | `/srv/http`            | Web server files (Supermon, dashboards, websites, etc.) |
 | Directory | `/etc/asterisk`        | Asterisk / AllStar configuration                        |
 | File      | `/var/spool/cron/root` | Root user's cron jobs                                   |
+
+New installs start with an empty `targets.conf` until you run setup or add targets from the menu. Existing systems that already have targets are not changed.
 
 V1.0.4 UPDATE
 
@@ -146,7 +147,9 @@ This will:
 * Create a restore kit ZIP
 * Verify both archives
 * Apply retention settings
-* Upload via FTP if configured
+* Upload via FTP if configured (local archives are kept if FTP fails)
+
+At least one backup target must be configured before `--run` will succeed. Use `--setup` or `--menu` to add targets.
 
 ---
 
@@ -160,9 +163,10 @@ lws-backup --setup
 
 Use this option to:
 
-* Configure backup targets Folder or files
-* Configure FTP settings
-* Configure retention values, how many backups to keep on the Pi at any given time. Both backup and Restore kits are set at 4 files each
+* Configure general settings (backup/restore kit name prefixes, retention)
+* Optionally install HamVOIP/AllStar default targets
+* Add custom backup target folders or files
+* Configure FTP settings (including optional delete-local-after-upload)
 * Configure scheduled backups
 * Create or modify profiles
 
@@ -226,15 +230,15 @@ Allows modification of all configuration settings.
 
 ---
 
-## View Current Configuration
+## General Settings
 
-Displays:
+Configure from the Linux menu:
 
-* Active profile
-* Backup targets
-* FTP configuration
-* Retention settings
-* Backup locations
+* Backup ZIP name prefix
+* Restore kit ZIP name prefix
+* Retention (backups, restore kits, logs)
+
+The menu header also shows active profile and FTP enabled/disabled status.
 
 ---
 
@@ -258,7 +262,12 @@ WebServer
 
 ## Configure Backup Targets
 
-Add or remove folders and files included in backups.
+Add, remove, or reset folders and files included in backups from the Linux menu (**Backup Targets**).
+
+* Add folder or file targets
+* Remove individual targets
+* Reset to optional HamVOIP/AllStar legacy defaults
+* Edit `targets.conf` manually
 
 Examples:
 
@@ -283,12 +292,13 @@ Settings include:
 * FTP Username
 * FTP Password
 * Remote Directory
+* Delete timestamped local files after successful upload (optional, default: off)
 
 ---
 
 ## Configure Retention Settings
 
-Control how many files are retained.
+Control how many files are retained. Configure from **General Settings** in the Linux menu (also sets backup and restore kit ZIP name prefixes).
 
 Default values:
 
@@ -334,7 +344,14 @@ Exit the menu and return to the Linux shell.
 /LWS_Backup/backups
 ```
 
-Contains timestamped backup ZIP files.
+Contains timestamped backup ZIP files and a latest copy:
+
+```text
+Backup_<hostname>_<timestamp>.zip
+Backup_latest.zip
+```
+
+(With default prefix `Backup`. Custom prefixes use `<prefix>_latest.zip`.)
 
 ---
 
@@ -344,7 +361,16 @@ Contains timestamped backup ZIP files.
 /LWS_Backup/restore_kits
 ```
 
-Contains timestamped restore kit ZIP files.
+Contains timestamped restore kit ZIP files and a latest copy:
+
+```text
+Restore_kit_<hostname>_<timestamp>.zip
+Restore_kit_latest.zip
+```
+
+(With default prefix `Restore_kit`. Custom prefixes use `<prefix>_latest.zip`.)
+
+Inside the restore kit zip, the extracted folder name matches the restore kit prefix (default: `Restore_kit`).
 
 ---
 
@@ -405,6 +431,12 @@ Reinstall or repair:
 lws-backup --install
 ```
 
+Restore from a restore kit (interactive prompt):
+
+```bash
+lws-backup --restore
+```
+
 Verify installation:
 
 ```bash
@@ -457,11 +489,13 @@ Default backup command:
 /usr/local/sbin/lws-backup --run
 ```
 
-Default restore kit path:
+Default restore kit path (when using default prefix `Restore_kit`):
 
 ```text
 /LWS_Backup/restore_kits/Restore_kit_latest.zip
 ```
+
+If you change the restore kit prefix in **General Settings**, update the Windows Desktop restore kit path to match (for example `MyKit_latest.zip`).
 
 ## Installation
 
@@ -543,7 +577,7 @@ Backup command:
 /usr/local/sbin/lws-backup --run
 ```
 
-Restore kit path:
+Restore kit path (default prefix):
 
 ```text
 /LWS_Backup/restore_kits/Restore_kit_latest.zip
@@ -580,11 +614,25 @@ Check:
 
 ### Backup runs but download fails
 
-Verify that this file exists on the target system:
+Verify that the latest restore kit exists on the target system (default path):
 
 ```text
 /LWS_Backup/restore_kits/Restore_kit_latest.zip
 ```
+
+### Backup fails with no targets copied
+
+Add at least one backup target:
+
+```bash
+sudo lws-backup --menu
+```
+
+Choose **Backup Targets**, or run `sudo lws-backup --setup` and install/add targets.
+
+### FTP enabled but files remain local
+
+FTP upload failure does not roll back a successful backup. Local archives are kept and a warning is logged. Check `/LWS_Backup/logs` and FTP settings.
 
 ### Installer says a newer or older version exists
 
@@ -617,6 +665,17 @@ New capabilities include:
 - Improved workflow for custom backup configurations
 
 Future releases will synchronize custom backup targets directly to the Linux node and integrate them into the backup engine.
+
+### Linux backup script improvements (v17)
+
+The Linux `lws-backup` script includes:
+
+* Optional HamVOIP/AllStar defaults during setup (no longer forced on new installs)
+* Remove individual backup targets from the Linux menu
+* Configurable backup and restore kit ZIP prefixes
+* Safer restore flow (dry-run failure does not trigger live restore)
+* Dynamic restore kit folder naming inside the zip
+* FTP delete-local-after-upload option (off by default)
 
 ## Author
 
