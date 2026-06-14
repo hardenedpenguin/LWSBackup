@@ -51,10 +51,11 @@ HOSTNAME="$(hostname 2>/dev/null || echo unknown-host)"
 LOCK_FILE="/tmp/lwsbackup.lock"
 LOG_FILE="$LOG_DIR/lwsbackup_v${VERSION}_${DATESTAMP}.log"
 WORK_DIR="$TMP_DIR/work_${DATESTAMP}"
-KIT_DIR="$TMP_DIR/Restore_kit_${DATESTAMP}"
+RESTORE_KIT_PREFIX="Restore_kit"
+KIT_FOLDER_NAME="Restore_kit"
+KIT_DIR="$TMP_DIR/${KIT_FOLDER_NAME}_${DATESTAMP}"
 SELF_SCRIPT="$SCRIPT_DIR/lwsbackup.sh"
 BACKUP_PREFIX="Backup"
-RESTORE_KIT_PREFIX="Restore_kit"
 MAX_BACKUPS=4
 MAX_RESTORE_KITS=4
 MAX_LOGS=10
@@ -164,6 +165,15 @@ make_lock() {
     echo "$$" > "$LOCK_FILE"
 }
 
+# Fresh timestamps for each backup job (menu sessions can stay open a long time).
+refresh_job_paths() {
+    DATESTAMP="$(date +%Y%m%d-%H%M%S)"
+    LOG_FILE="$LOG_DIR/lwsbackup_v${VERSION}_${DATESTAMP}.log"
+    WORK_DIR="$TMP_DIR/work_${DATESTAMP}"
+    KIT_FOLDER_NAME="${RESTORE_KIT_PREFIX:-Restore_kit}"
+    KIT_DIR="$TMP_DIR/${KIT_FOLDER_NAME}_${DATESTAMP}"
+}
+
 strip_ansi_sequences() {
     # Remove terminal escape sequences that can accidentally get captured
     # from dialog/clear on older terminals. This prevents garbage like
@@ -202,8 +212,18 @@ EOC
     chmod 600 "$CONFIG_FILE"
 }
 
+normalize_ftp_remote_dir() {
+    remote="${1:-/}"
+    [ -z "$remote" ] && remote="/"
+    case "$remote" in
+        */) printf '%s' "$remote" ;;
+        *) printf '%s/' "$remote" ;;
+    esac
+}
+
 save_ftp_config() {
     mkdir -p "$CONFIG_DIR"
+    FTP_REMOTE_DIR="$(normalize_ftp_remote_dir "${FTP_REMOTE_DIR:-/}")"
     cat > "$FTP_FILE" <<EOC
 # LWSBackup FTP configuration
 # FTP is disabled unless FTP_ENABLED="yes".
@@ -623,13 +643,16 @@ configure_targets_menu() {
 
 # ---------------- Backup engine ---------------- #
 build_names() {
-    safe_prefix="$(sanitize_name "$BACKUP_PREFIX")"; [ -z "$safe_prefix" ] && safe_prefix="Backup"
-    BACKUP_NAME="${safe_prefix}_${HOSTNAME}_${DATESTAMP}.zip"
+    BACKUP_NAME="${BACKUP_PREFIX}_${HOSTNAME}_${DATESTAMP}.zip"
     RESTORE_KIT_NAME="${RESTORE_KIT_PREFIX}_${HOSTNAME}_${DATESTAMP}.zip"
     BACKUP_FILE="$BACKUP_DIR/$BACKUP_NAME"
-    LATEST_BACKUP_FILE="$BACKUP_DIR/Backup_latest.zip"
+    LATEST_BACKUP_NAME="${BACKUP_PREFIX}_latest.zip"
+    LATEST_BACKUP_FILE="$BACKUP_DIR/$LATEST_BACKUP_NAME"
     RESTORE_KIT_FILE="$RESTORE_KIT_DIR/$RESTORE_KIT_NAME"
-    LATEST_RESTORE_KIT_FILE="$RESTORE_KIT_DIR/Restore_kit_latest.zip"
+    LATEST_RESTORE_KIT_NAME="${RESTORE_KIT_PREFIX}_latest.zip"
+    LATEST_RESTORE_KIT_FILE="$RESTORE_KIT_DIR/$LATEST_RESTORE_KIT_NAME"
+    KIT_BACKUP_PATH="backups/$LATEST_BACKUP_NAME"
+    KIT_FOLDER_NAME="${RESTORE_KIT_PREFIX}"
 }
 
 create_backup_metadata() {
@@ -639,6 +662,7 @@ create_backup_metadata() {
         echo "Created: $DATESTAMP"
         echo "Hostname: $HOSTNAME"
         echo "Backup Prefix: $BACKUP_PREFIX"
+        echo "Restore Kit Prefix: $RESTORE_KIT_PREFIX"
         echo "Active Profile: $ACTIVE_PROFILE"
         echo
         echo "Targets:"
@@ -648,25 +672,60 @@ create_backup_metadata() {
     hostname > "$WORK_DIR/system/hostname.txt" 2>/dev/null
     uname -a > "$WORK_DIR/system/uname.txt" 2>/dev/null
     crontab -l > "$WORK_DIR/system/root-crontab.txt" 2>/dev/null
-    if command -v ip >/dev/null 2>&1; then ip addr > "$WORK_DIR/system/network.txt" 2>/dev/null; elif command -v ifconfig >/dev/null 2>&1; then ifconfig -a > "$WORK_DIR/system/network.txt" 2>/dev/null; fi
+    if command -v ip >/dev/null 2>&1; then
+        ip addr > "$WORK_DIR/system/network.txt" 2>/dev/null
+    elif command -v ifconfig >/dev/null 2>&1; then
+        ifconfig -a > "$WORK_DIR/system/network.txt" 2>/dev/null
+    fi
     cp "$LOG_FILE" "$WORK_DIR/logs/backup.log" 2>/dev/null
 }
 
+copy_target_entry() {
+    type="$1"
+    src="$2"
+    zipname="$3"
+
+    case "$type" in
+        DIR)
+            [ -d "$src" ] || { echo_log "Skipped missing directory: $src"; return 1; }
+            ;;
+        FILE)
+            [ -f "$src" ] || { echo_log "Skipped missing file: $src"; return 1; }
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    if [ -e "$WORK_DIR/$zipname" ]; then
+        echo_log "WARNING: ZIP name collision for $zipname (source: $src). Skipping to avoid overwrite."
+        return 1
+    fi
+
+    cp -a "$src" "$WORK_DIR/$zipname" || fail_exit "Failed copying $src"
+    echo_log "Added $type: $src -> $zipname"
+    return 0
+}
+
 backup_targets() {
+    copied=0
     echo_log "Creating backup workspace..."
     mkdir -p "$WORK_DIR" || fail_exit "Could not create work directory"
     echo_log "Collecting backup targets..."
     [ ! -f "$TARGETS_FILE" ] && create_empty_targets_if_missing
-    while IFS='|' read type src zipname dest; do
-        case "$type" in ""|\#*) continue ;; esac
+
+    while IFS='|' read -r type src zipname dest; do
+        case "$type" in
+            ""|\#*) continue ;;
+        esac
         [ -z "$src" ] && continue
         [ -z "$zipname" ] && zipname="$(basename "$src")"
-        if [ "$type" = "DIR" ]; then
-            if [ -d "$src" ]; then cp -a "$src" "$WORK_DIR/$zipname" || fail_exit "Failed copying $src"; echo_log "Added directory: $src -> $zipname"; else echo_log "Skipped missing directory: $src"; fi
-        elif [ "$type" = "FILE" ]; then
-            if [ -f "$src" ]; then cp -a "$src" "$WORK_DIR/$zipname" || fail_exit "Failed copying $src"; echo_log "Added file: $src -> $zipname"; else echo_log "Skipped missing file: $src"; fi
+        if copy_target_entry "$type" "$src" "$zipname"; then
+            copied=$((copied + 1))
         fi
     done < "$TARGETS_FILE"
+
+    [ "$copied" -eq 0 ] && fail_exit "No backup targets were found or copied. Add targets with: sudo lws-backup --menu"
     create_backup_metadata
 }
 
@@ -674,69 +733,82 @@ create_backup() {
     build_names
     backup_targets
     echo_log "Creating backup zip: $BACKUP_FILE"
-    ( cd "$WORK_DIR" || exit 1; zip -r "$BACKUP_FILE" ./* ) >> "$LOG_FILE" 2>&1 || fail_exit "Backup zip failed"
+    ( cd "$WORK_DIR" || exit 1; zip -r "$BACKUP_FILE" . ) >> "$LOG_FILE" 2>&1 || fail_exit "Backup zip failed"
     cp -f "$BACKUP_FILE" "$LATEST_BACKUP_FILE" || fail_exit "Could not update latest backup"
     echo_log "Backup created successfully."
 }
 
 # ---------------- Restore kit ---------------- #
 create_restore_script() {
-    cat > "$KIT_DIR/restore.sh" <<'EOS'
+    cat > "$KIT_DIR/restore.sh" <<EOS
 #!/bin/bash
-# Restore Script generated by LWSBackup v12
-KIT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BACKUP_ZIP="$KIT_DIR/backups/Backup_latest.zip"
-TARGETS_FILE="$KIT_DIR/restore_targets.conf"
-RESTORE_WORK="/tmp/LWSBackup_restore_work_$$"
-LOG_FILE="$KIT_DIR/restore.log"
+# Restore Script generated by LWSBackup v${VERSION}
+KIT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+BACKUP_ZIP="\$KIT_DIR/${KIT_BACKUP_PATH}"
+TARGETS_FILE="\$KIT_DIR/restore_targets.conf"
+RESTORE_WORK="/tmp/LWSBackup_restore_work_\$\$"
+LOG_FILE="\$KIT_DIR/restore.log"
 DRY_RUN="no"
+LWS_ROOT="${LWS_ROOT}"
 
-echo_log() { echo "$1"; echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"; }
-fail_exit() { echo_log "ERROR: $1"; rm -rf "$RESTORE_WORK"; exit 1; }
+echo_log() { echo "\$1"; echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" >> "\$LOG_FILE"; }
+fail_exit() { echo_log "ERROR: \$1"; rm -rf "\$RESTORE_WORK"; exit 1; }
 usage() { echo "Usage: sudo ./restore.sh [--dry-run]"; }
-[ "$1" = "--dry-run" ] && DRY_RUN="yes"
-[ "$1" = "--help" ] || [ "$1" = "-h" ] && { usage; exit 0; }
-[ "$(id -u)" != "0" ] && { echo "This restore script must be run as root."; exit 1; }
+[ "\$1" = "--dry-run" ] && DRY_RUN="yes"
+[ "\$1" = "--help" ] || [ "\$1" = "-h" ] && { usage; exit 0; }
+[ "\$(id -u)" != "0" ] && { echo "This restore script must be run as root."; exit 1; }
 command -v unzip >/dev/null 2>&1 || fail_exit "unzip is missing"
 command -v cp >/dev/null 2>&1 || fail_exit "cp is missing"
-[ -f "$BACKUP_ZIP" ] || fail_exit "Backup zip not found: $BACKUP_ZIP"
-[ -f "$TARGETS_FILE" ] || fail_exit "Restore target file not found: $TARGETS_FILE"
+[ -f "\$BACKUP_ZIP" ] || fail_exit "Backup zip not found: \$BACKUP_ZIP"
+[ -f "\$TARGETS_FILE" ] || fail_exit "Restore target file not found: \$TARGETS_FILE"
 echo_log "Starting restore..."
-[ "$DRY_RUN" = "yes" ] && echo_log "DRY RUN MODE: No files will be changed."
-mkdir -p "$RESTORE_WORK"
-unzip -q "$BACKUP_ZIP" -d "$RESTORE_WORK" || fail_exit "Could not unzip backup"
+[ "\$DRY_RUN" = "yes" ] && echo_log "DRY RUN MODE: No files will be changed."
+mkdir -p "\$RESTORE_WORK"
+unzip -q "\$BACKUP_ZIP" -d "\$RESTORE_WORK" || fail_exit "Could not unzip backup"
 backup_existing_path() {
-    dest="$1"
-    if [ -e "$dest" ]; then
-        bak="${dest}.bak.$(date +%Y%m%d-%H%M%S)"
-        echo_log "Existing path found: $dest"
-        echo_log "Creating safety backup: $bak"
-        [ "$DRY_RUN" = "no" ] && cp -a "$dest" "$bak" || true
+    dest="\$1"
+    if [ -e "\$dest" ]; then
+        bak="\${dest}.bak.\$(date +%Y%m%d-%H%M%S)"
+        echo_log "Existing path found: \$dest"
+        echo_log "Creating safety backup: \$bak"
+        [ "\$DRY_RUN" = "no" ] && cp -a "\$dest" "\$bak" || true
     fi
 }
 restore_dir() {
-    zipname="$1"; dest="$2"; src="$RESTORE_WORK/$zipname"
-    [ -d "$src" ] || { echo_log "Skipped missing ZIP directory: $zipname"; return; }
-    echo_log "Restore directory: $zipname -> $dest"
-    backup_existing_path "$dest"
-    if [ "$DRY_RUN" = "no" ]; then mkdir -p "$dest" || fail_exit "Could not create $dest"; cp -a "$src/." "$dest/" || fail_exit "Failed restoring $dest"; fi
+    zipname="\$1"; dest="\$2"; src="\$RESTORE_WORK/\$zipname"
+    [ -d "\$src" ] || { echo_log "Skipped missing ZIP directory: \$zipname"; return; }
+    echo_log "Restore directory: \$zipname -> \$dest"
+    backup_existing_path "\$dest"
+    if [ "\$DRY_RUN" = "no" ]; then
+        mkdir -p "\$dest" || fail_exit "Could not create \$dest"
+        cp -a "\$src/." "\$dest/" || fail_exit "Failed restoring \$dest"
+    fi
 }
 restore_file() {
-    zipname="$1"; dest="$2"; src="$RESTORE_WORK/$zipname"
-    [ -f "$src" ] || { echo_log "Skipped missing ZIP file: $zipname"; return; }
-    echo_log "Restore file: $zipname -> $dest"
-    backup_existing_path "$dest"
-    if [ "$DRY_RUN" = "no" ]; then mkdir -p "$(dirname "$dest")" || fail_exit "Could not create parent folder for $dest"; cp -a "$src" "$dest" || fail_exit "Failed restoring $dest"; fi
+    zipname="\$1"; dest="\$2"; src="\$RESTORE_WORK/\$zipname"
+    [ -f "\$src" ] || { echo_log "Skipped missing ZIP file: \$zipname"; return; }
+    echo_log "Restore file: \$zipname -> \$dest"
+    backup_existing_path "\$dest"
+    if [ "\$DRY_RUN" = "no" ]; then
+        mkdir -p "\$(dirname "\$dest")" || fail_exit "Could not create parent folder for \$dest"
+        cp -a "\$src" "\$dest" || fail_exit "Failed restoring \$dest"
+    fi
 }
-while IFS='|' read type src zipname dest; do
-    case "$type" in ""|\#*) continue ;; esac
-    [ -z "$dest" ] && dest="$src"
-    [ "$type" = "DIR" ] && restore_dir "$zipname" "$dest"
-    [ "$type" = "FILE" ] && restore_file "$zipname" "$dest"
-done < "$TARGETS_FILE"
-chmod +x /LWS_Backup/scripts/*.sh 2>/dev/null
-[ "$DRY_RUN" = "yes" ] && echo_log "Dry-run restore completed. No files were changed." || echo_log "Restore completed. Reboot recommended."
-rm -rf "$RESTORE_WORK"
+while IFS='|' read -r type src zipname dest; do
+    case "\$type" in
+        ""|\#*) continue ;;
+    esac
+    [ -z "\$dest" ] && dest="\$src"
+    [ "\$type" = "DIR" ] && restore_dir "\$zipname" "\$dest"
+    [ "\$type" = "FILE" ] && restore_file "\$zipname" "\$dest"
+done < "\$TARGETS_FILE"
+chmod +x "\$LWS_ROOT/scripts/"*.sh 2>/dev/null
+if [ "\$DRY_RUN" = "yes" ]; then
+    echo_log "Dry-run restore completed. No files were changed."
+else
+    echo_log "Restore completed. Reboot recommended."
+fi
+rm -rf "\$RESTORE_WORK"
 exit 0
 EOS
     chmod +x "$KIT_DIR/restore.sh"
@@ -746,7 +818,7 @@ create_restore_kit() {
     build_names
     echo_log "Creating restore kit..."
     mkdir -p "$KIT_DIR/backups" "$KIT_DIR/scripts" || fail_exit "Could not create restore kit folders"
-    cp -f "$LATEST_BACKUP_FILE" "$KIT_DIR/backups/Backup_latest.zip" || fail_exit "Could not copy latest backup into restore kit"
+    cp -f "$LATEST_BACKUP_FILE" "$KIT_DIR/$KIT_BACKUP_PATH" || fail_exit "Could not copy latest backup into restore kit"
     cp -f "$TARGETS_FILE" "$KIT_DIR/restore_targets.conf" || fail_exit "Could not copy targets file into restore kit"
     cp -f "$SELF_SCRIPT" "$KIT_DIR/scripts/lwsbackup.sh" 2>/dev/null || cp -f "$0" "$KIT_DIR/scripts/lwsbackup.sh"
     create_restore_script
@@ -754,7 +826,7 @@ create_restore_kit() {
 VERSION="$VERSION"
 HOSTNAME="$HOSTNAME"
 CREATED="$DATESTAMP"
-BACKUP_FILE="backups/Backup_latest.zip"
+BACKUP_FILE="$KIT_BACKUP_PATH"
 TARGETS_FILE="restore_targets.conf"
 EOC
     cat > "$KIT_DIR/README_RESTORE.txt" <<EOR
@@ -764,21 +836,24 @@ Host: $HOSTNAME
 Generated by: LWSBackup v$VERSION
 
 Restore instructions:
-1. unzip Restore_kit_latest.zip
-2. cd Restore_kit
+1. unzip $LATEST_RESTORE_KIT_NAME
+2. cd $KIT_FOLDER_NAME
 3. sudo ./restore.sh --dry-run
 4. sudo ./restore.sh
 5. sudo reboot
 
 Existing restore destinations are copied to .bak.YYYYMMDD-HHMMSS before overwrite.
 EOR
-    ( cd "$KIT_DIR" || exit 1; sha256sum backups/Backup_latest.zip > sha256sums.txt ) >> "$LOG_FILE" 2>&1
+    ( cd "$KIT_DIR" || exit 1; sha256sum "$KIT_BACKUP_PATH" > sha256sums.txt ) >> "$LOG_FILE" 2>&1
     echo_log "Zipping restore kit: $RESTORE_KIT_FILE"
-    ( cd "$TMP_DIR" || exit 1; rm -rf "$TMP_DIR/Restore_kit"; mv "$KIT_DIR" "$TMP_DIR/Restore_kit"; zip -r "$RESTORE_KIT_FILE" "Restore_kit" ) >> "$LOG_FILE" 2>&1 || fail_exit "Restore kit zip failed"
+    ( cd "$TMP_DIR" || exit 1
+      rm -rf "$TMP_DIR/$KIT_FOLDER_NAME"
+      mv "$KIT_DIR" "$TMP_DIR/$KIT_FOLDER_NAME"
+      zip -r "$RESTORE_KIT_FILE" "$KIT_FOLDER_NAME"
+    ) >> "$LOG_FILE" 2>&1 || fail_exit "Restore kit zip failed"
     cp -f "$RESTORE_KIT_FILE" "$LATEST_RESTORE_KIT_FILE" || fail_exit "Could not update latest restore kit"
     echo_log "Restore kit created successfully."
 }
-
 
 # ---------------- Verification ---------------- #
 verify_zip_file() {
@@ -801,12 +876,26 @@ upload_ftp() {
     sanitize_runtime_settings
     [ "$FTP_ENABLED" != "yes" ] && { echo_log "FTP disabled. Skipping upload."; return 0; }
     check_commands_optional
-    [ -z "$FTP_SERVER" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ] && { echo_log "FTP enabled but incomplete settings. Skipping upload."; return 1; }
-    port="${FTP_PORT:-21}"; remote="${FTP_REMOTE_DIR:-/}"
+    if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
+        echo_log "FTP enabled but incomplete settings. Skipping upload."
+        return 1
+    fi
+    port="${FTP_PORT:-21}"
+    remote="$(normalize_ftp_remote_dir "${FTP_REMOTE_DIR:-/}")"
     echo_log "Uploading backup and restore kit to FTP server..."
-    curl -T "$BACKUP_FILE" -u "$FTP_USER:$FTP_PASSWORD" "ftp://$FTP_SERVER:$port$remote/" >> "$LOG_FILE" 2>&1 || { echo_log "FTP upload failed for backup."; return 1; }
-    curl -T "$RESTORE_KIT_FILE" -u "$FTP_USER:$FTP_PASSWORD" "ftp://$FTP_SERVER:$port$remote/" >> "$LOG_FILE" 2>&1 || { echo_log "FTP upload failed for restore kit."; return 1; }
+    curl -T "$BACKUP_FILE" -u "$FTP_USER:$FTP_PASSWORD" "ftp://$FTP_SERVER:$port$remote/" >> "$LOG_FILE" 2>&1 || {
+        echo_log "FTP upload failed for backup."
+        return 1
+    }
+    curl -T "$RESTORE_KIT_FILE" -u "$FTP_USER:$FTP_PASSWORD" "ftp://$FTP_SERVER:$port$remote/" >> "$LOG_FILE" 2>&1 || {
+        echo_log "FTP upload failed for restore kit."
+        return 1
+    }
     echo_log "FTP upload completed."
+    if [ "$FTP_DELETE_LOCAL_AFTER_UPLOAD" = "yes" ]; then
+        echo_log "Deleting timestamped local archives after successful FTP upload..."
+        rm -f "$BACKUP_FILE" "$RESTORE_KIT_FILE"
+    fi
 }
 
 configure_ftp_menu() {
@@ -815,9 +904,11 @@ configure_ftp_menu() {
     FTP_SERVER="$(inputbox "FTP Server" "FTP server hostname or IP:" "${FTP_SERVER:-}")" || FTP_SERVER="${FTP_SERVER:-}"
     FTP_PORT="$(inputbox "FTP Port" "FTP port:" "${FTP_PORT:-21}")" || FTP_PORT="${FTP_PORT:-21}"
     FTP_USER="$(inputbox "FTP Username" "FTP username:" "${FTP_USER:-}")" || FTP_USER="${FTP_USER:-}"
-    oldpw="${FTP_PASSWORD:-}"; newpw="$(passwordbox "FTP Password" "FTP password. Leave blank to keep existing password.")" || newpw=""
+    oldpw="${FTP_PASSWORD:-}"
+    newpw="$(passwordbox "FTP Password" "FTP password. Leave blank to keep existing password.")" || newpw=""
     [ -n "$newpw" ] && FTP_PASSWORD="$newpw" || FTP_PASSWORD="$oldpw"
     FTP_REMOTE_DIR="$(inputbox "FTP Remote Directory" "Remote FTP folder path:" "${FTP_REMOTE_DIR:-/}")" || FTP_REMOTE_DIR="${FTP_REMOTE_DIR:-/}"
+    FTP_REMOTE_DIR="$(normalize_ftp_remote_dir "${FTP_REMOTE_DIR:-/}")"
     yesno "Delete Local After FTP?" "Delete timestamped local files after successful FTP upload?\n\nRecommended: No." && FTP_DELETE_LOCAL_AFTER_UPLOAD="yes" || FTP_DELETE_LOCAL_AFTER_UPLOAD="no"
     save_ftp_config
     msgbox "FTP Saved" "FTP settings saved.\n\nFTP Enabled: $FTP_ENABLED"
@@ -825,10 +916,10 @@ configure_ftp_menu() {
 
 cleanup_old_files() {
     load_config
-    sanitize_runtime_settings
+    build_names
     echo_log "Cleaning old backups, restore kits, and logs..."
-    find "$BACKUP_DIR" -name "*.zip" ! -name "Backup_latest.zip" -type f | sort | head -n -"$MAX_BACKUPS" | xargs -r rm --
-    find "$RESTORE_KIT_DIR" -name "*.zip" ! -name "Restore_kit_latest.zip" -type f | sort | head -n -"$MAX_RESTORE_KITS" | xargs -r rm --
+    find "$BACKUP_DIR" -name "*.zip" ! -name "$LATEST_BACKUP_NAME" -type f | sort | head -n -"$MAX_BACKUPS" | xargs -r rm --
+    find "$RESTORE_KIT_DIR" -name "*.zip" ! -name "$LATEST_RESTORE_KIT_NAME" -type f | sort | head -n -"$MAX_RESTORE_KITS" | xargs -r rm --
     find "$LOG_DIR" -name "*.log" -type f | sort | head -n -"$MAX_LOGS" | xargs -r rm --
 }
 
@@ -877,13 +968,28 @@ configure_cron_menu() {
 
 configure_general_menu() {
     load_config
+    old_backup_prefix="$BACKUP_PREFIX"
+    old_restore_prefix="$RESTORE_KIT_PREFIX"
     newprefix="$(inputbox "Backup Name Prefix" "Backup ZIP prefix. Timestamp and hostname are added automatically:" "$BACKUP_PREFIX")" || return
     [ -n "$newprefix" ] && BACKUP_PREFIX="$(sanitize_name "$newprefix")"
+    newkitprefix="$(inputbox "Restore Kit Prefix" "Restore kit ZIP prefix. Timestamp and hostname are added automatically:" "$RESTORE_KIT_PREFIX")" || return
+    [ -n "$newkitprefix" ] && RESTORE_KIT_PREFIX="$(sanitize_name "$newkitprefix")"
     MAX_BACKUPS="$(inputbox "Max Backups" "How many timestamped backups to keep locally:" "$MAX_BACKUPS")" || true
     MAX_RESTORE_KITS="$(inputbox "Max Restore Kits" "How many timestamped restore kits to keep locally:" "$MAX_RESTORE_KITS")" || true
     MAX_LOGS="$(inputbox "Max Logs" "How many logs to keep:" "$MAX_LOGS")" || true
     sanitize_runtime_settings
-    save_config; msgbox "Settings Saved" "Settings saved."
+    if [ "$BACKUP_PREFIX" != "$old_backup_prefix" ]; then
+        rm -f "$BACKUP_DIR/${old_backup_prefix}_latest.zip"
+    fi
+    if [ "$RESTORE_KIT_PREFIX" != "$old_restore_prefix" ]; then
+        rm -f "$RESTORE_KIT_DIR/${old_restore_prefix}_latest.zip"
+    fi
+    save_config
+    msgbox "Settings Saved" "Settings saved."
+}
+
+list_profile_names() {
+    find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null
 }
 
 profiles_menu() {
@@ -971,11 +1077,54 @@ Open menu with:
 }
 
 run_backup_job() {
-    check_root; create_folders; initialize_defaults; make_lock; check_commands_core; check_commands_optional; install_self
+    check_root
+    create_folders
+    initialize_defaults
+    refresh_job_paths
+    make_lock
+    check_commands_core
+    check_commands_optional
     echo_log "Starting LWSBackup v$VERSION"
-    create_backup; create_restore_kit; verify_archives; upload_ftp; cleanup_old_files; cleanup
+    create_backup
+    create_restore_kit
+    verify_archives
+    ftp_rc=0
+    upload_ftp || ftp_rc=$?
+    cleanup_old_files
+    cleanup
     echo_log "Backup job completed."
-    echo; echo "Backup complete."; echo "Backup: $BACKUP_FILE"; echo "Restore kit: $RESTORE_KIT_FILE"; echo "Latest backup: $LATEST_BACKUP_FILE"; echo "Latest restore kit: $LATEST_RESTORE_KIT_FILE"; echo
+    echo
+    echo "Backup complete."
+    echo "Backup: $BACKUP_FILE"
+    echo "Restore kit: $RESTORE_KIT_FILE"
+    echo "Latest backup: $LATEST_BACKUP_FILE"
+    echo "Latest restore kit: $LATEST_RESTORE_KIT_FILE"
+    if [ "$ftp_rc" -ne 0 ]; then
+        echo_log "WARNING: Backup completed but FTP upload failed or was skipped."
+        echo "Warning: FTP upload failed or was skipped. Local archives were kept."
+    fi
+    echo
+}
+
+run_setup_wizard() {
+    msgbox "LWSBackup v$VERSION" "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
+    configure_general_menu
+    if yesno "Default Targets" "Install default HamVOIP/AllStar targets?\n\n/srv/http\n/etc/asterisk\n/var/spool/cron/root\n\nIf No, add targets manually later."; then
+        create_legacy_default_targets
+    fi
+    if yesno "Backup Targets" "Do you want to add more custom folders or files now?"; then
+        configure_targets_menu
+    fi
+    if yesno "FTP" "Do you want to configure FTP upload now?\n\nIf skipped, FTP remains disabled but the template config stays available."; then
+        configure_ftp_menu
+    else
+        FTP_ENABLED="no"
+        save_ftp_config
+    fi
+    if yesno "Cron" "Do you want to create an automatic cron schedule now?"; then
+        configure_cron_menu
+    fi
+    msgbox "Setup Complete" "Setup is complete.\n\nRun now:\n/usr/local/sbin/lws-backup --run\n\nOpen menu:\n/usr/local/sbin/lws-backup --menu"
 }
 
 first_run_setup() {
