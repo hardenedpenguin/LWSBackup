@@ -9,16 +9,81 @@ LWSBackup Desktop is a Windows application that provides a simple graphical inte
 
 Instead of manually opening SSH sessions and downloading backup archives, LWSBackup Desktop allows users to run backups and download restore kits with a few clicks.
 
+### Supported Systems
+
+- Raspberry Pi OS
+- Debian
+- Ubuntu
+- HamVOIP
+- AllStarLink
+- AllStarLink 3
+- Linux Mint
+- Most Debian-based Linux distributions
+- 
 #
-At the moment it is setup to backup only certain folder like 
+Hardcoded backup folders specifically for GMRSHub and Allstarlink. Allstarlink V3 i dont use so no idea if these folders are still relevant to that version.
+Will take out the hardcoded directories in future update
+
 | Type      | Path                   | Purpose                                                 |
 | --------- | ---------------------- | ------------------------------------------------------- |
 | Directory | `/srv/http`            | Web server files (Supermon, dashboards, websites, etc.) |
 | Directory | `/etc/asterisk`        | Asterisk / AllStar configuration                        |
 | File      | `/var/spool/cron/root` | Root user's cron jobs                                   |
 
+V1.0.4 UPDATE
+
+# Backup Targets
+
+LWSBackup now supports custom backup targets.
+
+Backup targets can be configured either:
+
+- From the Linux setup wizard (`lws-backup --setup`)
+- From the Windows Desktop application
+
+The Windows application now includes a built-in Linux File Browser that can:
+
+- Connect to a remote Linux node using SSH
+- Display files, folders, and symbolic links
+- Browse the remote filesystem
+- Add custom files or folders as backup targets
+- Remove backup targets
+- Save backup target selections locally
+
+Examples:
+
+```text
+/etc/asterisk
+/etc/apache2
+/home
+/opt
+/srv/http
+/var/spool/cron/root
+```
+
+Users are no longer limited to the default backup paths and may select any file or folder they wish to include in their backups.
 #
 
+ ### Configure Backup Targets (Optional)
+
+Click:
+
+```text
+Add Folders
+```
+
+This opens the Backup Target Manager.
+
+From here you can:
+
+- Scan the remote Linux filesystem
+- Browse files and folders
+- Browse symbolic links
+- Add custom backup targets
+- Remove backup targets
+- Save target selections
+
+This allows backups to include files and directories beyond the default LWSBackup configuration.
 # LWSBackup Manual Usage Guide
 
 Install and run this program first, it will install all necesary files and settings into your Pi. Then if you like you can run manual commands from terminal'
@@ -360,6 +425,16 @@ which lws-backup
 - Windows MSI installer
 - Desktop and Start Menu shortcuts
 
+### Backup Target Management (NEW in v1.0.4)
+
+- Remote Linux file browser
+- Live SSH filesystem scanning
+- Browse files, folders, and symbolic links
+- Add custom backup targets
+- Remove backup targets
+- Save backup target selections
+- Support for custom files and directories
+
 ## Requirements
 
 ### Windows Computer
@@ -521,8 +596,26 @@ Future releases should support upgrade installs when the MSI version is increase
 Current version:
 
 ```text
-1.0.2
+1.0.4
 ```
+
+## What's New in v1.0.4
+
+### Backup Target Manager
+
+This release introduces the first version of the Backup Target Manager.
+
+New capabilities include:
+
+- Remote Linux filesystem browsing
+- SSH-powered filesystem scanning
+- File and directory selection
+- Backup target management interface
+- Improved user interface and navigation
+- Larger management windows and controls
+- Improved workflow for custom backup configurations
+
+Future releases will synchronize custom backup targets directly to the Linux node and integrate them into the backup engine.
 
 ## Author
 
