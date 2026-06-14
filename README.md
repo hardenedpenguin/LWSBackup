@@ -19,7 +19,8 @@ Instead of manually opening SSH sessions and downloading backup archives, LWSBac
 - AllStarLink 3
 - Linux Mint
 - Most Debian-based Linux distributions
-- 
+- Should work in other Linux Systems you will have to try.
+  
 #
 Hardcoded backup folders specifically for GMRSHub and Allstarlink. Allstarlink V3 i dont use so no idea if these folders are still relevant to that version.
 Will take out the hardcoded directories in future update
