@@ -9,7 +9,6 @@
 #
 # Default targets are optional during setup (HamVOIP/AllStar paths offered in wizard).
 # Empty targets.conf is created on first run; add targets via --setup or --menu.
-#
 # targets.conf format:
 #   TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
 #
@@ -68,7 +67,9 @@ FTP_PASSWORD=""
 FTP_REMOTE_DIR="/"
 ACTIVE_PROFILE="default"
 DIALOG_BIN=""
+DIALOG_THEME_READY=0
 DIALOGRC_FILE="/tmp/lwsbackup-dialogrc.$$"
+SESSION_PREPARED=0
 
 # ---------------- Basic helpers ---------------- #
 echo_log() {
@@ -96,23 +97,26 @@ pause_text() {
 }
 
 # Clear the terminal without polluting command-substitution output.
-# IMPORTANT: dialog helper functions are often called like:
-#   value="$(inputbox ...)"
-# If plain `clear` writes escape codes to stdout inside those functions,
-# those escape codes get saved into config values. That breaks commands like:
-#   head -n -"$MAX_BACKUPS"
 clear_screen() {
     if [ -t 1 ]; then
         clear >/dev/tty 2>/dev/null || clear >&2
     fi
 }
 
-# Keep only digits from numeric settings and fall back to a safe default.
 clean_number() {
     value="$(echo "$1" | tr -cd '0-9')"
     default="$2"
     [ -z "$value" ] && value="$default"
     echo "$value"
+}
+
+strip_ansi_sequences() {
+    esc="$(printf '\033')"
+    printf '%s' "$1" | sed "s/${esc}\[[0-9;?]*[A-Za-z]//g"
+}
+
+sanitize_name() {
+    strip_ansi_sequences "$1" | tr ' ' '_' | tr -cd '[:alnum:]_.-'
 }
 
 sanitize_runtime_settings() {
@@ -121,14 +125,11 @@ sanitize_runtime_settings() {
     MAX_LOGS="$(clean_number "$MAX_LOGS" 10)"
     FTP_PORT="$(clean_number "$FTP_PORT" 21)"
 
-    # Clean user-visible name fields before they are shown in dialog boxes
-    # or written back to config.
     BACKUP_PREFIX="$(sanitize_name "$BACKUP_PREFIX")"
     RESTORE_KIT_PREFIX="$(sanitize_name "$RESTORE_KIT_PREFIX")"
     ACTIVE_PROFILE="$(sanitize_name "$ACTIVE_PROFILE")"
 
-    # Repair the most common leftover ANSI-clear contamination from older builds.
-    # Example: 3JH2JBackup -> Backup
+    # Repair leftover ANSI-clear contamination from older builds.
     case "$BACKUP_PREFIX" in
         *Backup*) BACKUP_PREFIX="Backup${BACKUP_PREFIX#*Backup}" ;;
     esac
@@ -174,21 +175,7 @@ refresh_job_paths() {
     KIT_DIR="$TMP_DIR/${KIT_FOLDER_NAME}_${DATESTAMP}"
 }
 
-strip_ansi_sequences() {
-    # Remove terminal escape sequences that can accidentally get captured
-    # from dialog/clear on older terminals. This prevents garbage like
-    # ^[[3J^[[H^[[2JBackup from being saved into config values.
-    esc="$(printf '\033')"
-    printf '%s' "$1" | sed "s/${esc}\[[0-9;?]*[A-Za-z]//g"
-}
-
-sanitize_name() {
-    strip_ansi_sequences "$1" | tr ' ' '_' | tr -cd '[:alnum:]_.-'
-}
-
 load_config() {
-    # Keep the script version authoritative. Older config files may contain VERSION="13" etc.
-    # If sourced directly, that old config value would make a newer script report the wrong version.
     script_version="$VERSION"
     [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
     [ -f "$FTP_FILE" ] && . "$FTP_FILE"
@@ -272,17 +259,19 @@ initialize_defaults() {
 }
 
 # ---------------- Dependencies ---------------- #
-install_package_for_command() {
+ensure_command() {
     cmd="$1"
-    pkg="$2"
-    if command -v "$cmd" >/dev/null 2>&1; then return 0; fi
+    pkg="${2:-$1}"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        return 0
+    fi
     echo "$cmd is missing. Attempting to install package: $pkg"
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y "$pkg"
-    elif command -v yum >/dev/null 2>&1; then
-        yum install -y "$pkg"
     elif command -v dnf >/dev/null 2>&1; then
         dnf install -y "$pkg"
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y "$pkg"
     elif command -v pacman >/dev/null 2>&1; then
         pacman -Sy --noconfirm "$pkg"
     elif command -v zypper >/dev/null 2>&1; then
@@ -293,43 +282,55 @@ install_package_for_command() {
     command -v "$cmd" >/dev/null 2>&1 || fail_exit "Installation failed for $cmd."
 }
 
+ensure_command_optional() {
+    cmd="$1"
+    pkg="${2:-$1}"
+    if command -v "$cmd" >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "$cmd is missing. Attempting to install package: $pkg"
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y "$pkg" >/dev/null 2>&1
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "$pkg" >/dev/null 2>&1
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y "$pkg" >/dev/null 2>&1
+    elif command -v pacman >/dev/null 2>&1; then
+        pacman -Sy --noconfirm "$pkg" >/dev/null 2>&1
+    elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive install "$pkg" >/dev/null 2>&1
+    else
+        echo "No supported package manager found. Install $cmd manually."
+        return 1
+    fi
+    command -v "$cmd" >/dev/null 2>&1
+}
+
 check_commands_core() {
-    install_package_for_command zip zip
-    install_package_for_command unzip unzip
-    install_package_for_command sha256sum coreutils
+    ensure_command zip zip
+    ensure_command unzip unzip
+    ensure_command sha256sum coreutils
 }
 
 check_commands_optional() {
     load_config
     if [ "$FTP_ENABLED" = "yes" ]; then
-        install_package_for_command curl curl
+        ensure_command curl curl
     fi
 }
 
-check_dialog() {
-    if command -v dialog >/dev/null 2>&1; then
-        DIALOG_BIN="$(command -v dialog)"
-        return 0
-    fi
-    return 1
-}
-
-install_dialog_if_possible() {
-    command -v dialog >/dev/null 2>&1 && return 0
-    echo "dialog is missing. Attempting to install..."
+install_cron_if_missing() {
+    command -v crontab >/dev/null 2>&1 && return 0
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq && apt-get install -y dialog
-    elif command -v pacman >/dev/null 2>&1; then
-        pacman -Sy --noconfirm dialog
-    elif command -v yum >/dev/null 2>&1; then
-        yum install -y dialog
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y dialog
+        ensure_command crontab cron
+    else
+        ensure_command crontab cronie
     fi
 }
 
 # ---------------- Dialog UI ---------------- #
 setup_dialog_theme() {
+    [ "$DIALOG_THEME_READY" -eq 1 ] && return 0
     cat > "$DIALOGRC_FILE" <<'EOD'
 use_shadow = OFF
 use_colors = ON
@@ -361,6 +362,23 @@ uarrow_color = (RED,WHITE,ON)
 darrow_color = (RED,WHITE,ON)
 gauge_color = (RED,WHITE,ON)
 EOD
+    DIALOG_THEME_READY=1
+}
+
+init_ui() {
+    if [ -z "$DIALOG_BIN" ] && command -v dialog >/dev/null 2>&1; then
+        DIALOG_BIN="$(command -v dialog)"
+    fi
+    if [ -n "$DIALOG_BIN" ]; then
+        setup_dialog_theme
+        return 0
+    fi
+    return 1
+}
+
+has_dialog() {
+    [ -n "$DIALOG_BIN" ] && return 0
+    init_ui
 }
 
 dialog_cmd() {
@@ -368,49 +386,77 @@ dialog_cmd() {
 }
 
 msgbox() {
-    title="$1"; text="$2"
-    if check_dialog; then
-        setup_dialog_theme
+    title="$1"
+    text="$2"
+    if has_dialog; then
         dialog_cmd --title "$title" --msgbox "$text" 16 76
         clear_screen
     else
-        echo; echo "==== $title ===="; echo "$text"; pause_text
+        echo
+        echo "==== $title ===="
+        echo "$text"
+        pause_text
     fi
 }
 
 yesno() {
-    title="$1"; text="$2"
-    if check_dialog; then
-        setup_dialog_theme
+    title="$1"
+    text="$2"
+    if has_dialog; then
         dialog_cmd --title "$title" --yesno "$text" 12 76
-        rc=$?; clear_screen; return $rc
-    else
-        echo; echo "$title"; echo "$text"; printf "Yes or No? [y/N]: "; read ans
-        [ "$ans" = "y" ] || [ "$ans" = "Y" ]
+        rc=$?
+        clear_screen
+        return $rc
     fi
+    echo
+    echo "$title"
+    echo "$text"
+    printf "Yes or No? [y/N]: "
+    read ans
+    [ "$ans" = "y" ] || [ "$ans" = "Y" ]
 }
 
 inputbox() {
-    title="$1"; text="$2"; default="$3"
-    if check_dialog; then
-        setup_dialog_theme
+    title="$1"
+    text="$2"
+    default="$3"
+    if has_dialog; then
         result="$(dialog_cmd --title "$title" --inputbox "$text" 12 76 "$default" 3>&1 1>&2 2>&3)"
-        rc=$?; clear_screen; [ $rc -eq 0 ] || return 1; echo "$result"; return 0
-    else
-        echo; echo "$title"; printf "%s [%s]: " "$text" "$default"; read result
-        [ -z "$result" ] && result="$default"; echo "$result"; return 0
+        rc=$?
+        clear_screen
+        [ $rc -eq 0 ] || return 1
+        echo "$result"
+        return 0
     fi
+    echo
+    echo "$title"
+    printf "%s [%s]: " "$text" "$default"
+    read result
+    [ -z "$result" ] && result="$default"
+    echo "$result"
+    return 0
 }
 
 passwordbox() {
-    title="$1"; text="$2"
-    if check_dialog; then
-        setup_dialog_theme
+    title="$1"
+    text="$2"
+    if has_dialog; then
         result="$(dialog_cmd --title "$title" --passwordbox "$text" 12 76 3>&1 1>&2 2>&3)"
-        rc=$?; clear_screen; [ $rc -eq 0 ] || return 1; echo "$result"; return 0
-    else
-        echo; echo "$title"; printf "%s: " "$text"; stty -echo; read result; stty echo; echo; echo "$result"; return 0
+        rc=$?
+        clear_screen
+        [ $rc -eq 0 ] || return 1
+        echo "$result"
+        return 0
     fi
+    echo
+    echo "$title"
+    printf "%s: " "$text"
+    stty -echo
+    read result
+    stty echo
+    echo
+    echo "$result"
+    return 0
 }
 
 # ---------------- Targets ---------------- #
@@ -596,8 +642,7 @@ configure_targets_menu() {
     while true; do
         current="$(list_targets_text)"
         [ -z "$current" ] && current="No targets configured."
-        if check_dialog; then
-            setup_dialog_theme
+        if has_dialog; then
             choice="$(dialog_cmd --title "Backup Targets" --menu "Current targets:\n\n$current\n\nChoose an action:" 24 84 9 \
                 "1" "Add folder target" \
                 "2" "Add file target" \
@@ -926,44 +971,89 @@ cleanup_old_files() {
 view_logs_menu() {
     latest="$(ls -1t "$LOG_DIR"/*.log 2>/dev/null | head -n 1)"
     [ -z "$latest" ] && { msgbox "Logs" "No log files found."; return; }
-    if check_dialog; then setup_dialog_theme; dialog_cmd --title "Latest Log: $(basename "$latest")" --textbox "$latest" 22 90; clear_screen; else less "$latest"; fi
+    if has_dialog; then
+        dialog_cmd --title "Latest Log: $(basename "$latest")" --textbox "$latest" 22 90
+        clear_screen
+    else
+        less "$latest"
+    fi
 }
 
-install_cron_if_missing() {
-    command -v crontab >/dev/null 2>&1 && return 0
-    if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm cronie; elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y cron; elif command -v yum >/dev/null 2>&1; then yum install -y cronie; elif command -v dnf >/dev/null 2>&1; then dnf install -y cronie; fi
-    command -v crontab >/dev/null 2>&1 || fail_exit "crontab is missing. Install cron/cronie manually."
+read_crontab_without_lws_block() {
+    crontab -l 2>/dev/null | awk "/$CRON_MARKER_BEGIN/ {skip=1; next} /$CRON_MARKER_END/ {skip=0; next} skip != 1 {print}"
+}
+
+write_crontab_tmp() {
+    tmp="$1"
+    read_crontab_without_lws_block > "$tmp"
+}
+
+install_crontab_from_tmp() {
+    tmp="$1"
+    if [ ! -s "$tmp" ]; then
+        crontab -r 2>/dev/null || true
+    else
+        crontab "$tmp"
+    fi
 }
 
 remove_cron_job() {
     tmp="/tmp/lwsbackup_cron.$$"
-    crontab -l 2>/dev/null | awk "/$CRON_MARKER_BEGIN/ {skip=1; next} /$CRON_MARKER_END/ {skip=0; next} skip != 1 {print}" > "$tmp"
-    crontab "$tmp"; rm -f "$tmp"
+    write_crontab_tmp "$tmp"
+    install_crontab_from_tmp "$tmp"
+    rm -f "$tmp"
 }
 
 add_cron_job() {
-    expr="$1"; tmp="/tmp/lwsbackup_cron.$$"
-    crontab -l 2>/dev/null | awk "/$CRON_MARKER_BEGIN/ {skip=1; next} /$CRON_MARKER_END/ {skip=0; next} skip != 1 {print}" > "$tmp"
-    { echo "$CRON_MARKER_BEGIN"; echo "$expr /usr/local/sbin/lws-backup --run"; echo "$CRON_MARKER_END"; } >> "$tmp"
-    crontab "$tmp"; rm -f "$tmp"
+    expr="$1"
+    tmp="/tmp/lwsbackup_cron.$$"
+    write_crontab_tmp "$tmp"
+    {
+        echo "$CRON_MARKER_BEGIN"
+        echo "$expr /usr/local/sbin/lws-backup --run"
+        echo "$CRON_MARKER_END"
+    } >> "$tmp"
+    install_crontab_from_tmp "$tmp"
+    rm -f "$tmp"
 }
 
 configure_cron_menu() {
     install_cron_if_missing
-    if ! yesno "Cron Schedule" "Do you want LWSBackup to run automatically from cron?"; then remove_cron_job; msgbox "Cron" "Automatic cron job removed/disabled."; return; fi
-    if check_dialog; then
-        setup_dialog_theme
-        sched="$(dialog_cmd --title "Cron Schedule" --menu "Choose backup schedule:" 16 76 6 "daily" "Every day" "weekly" "Every week" "monthly" "Monthly on the 1st" "custom" "Enter custom cron expression" 3>&1 1>&2 2>&3)"
-        rc=$?; clear_screen; [ $rc -eq 0 ] || return
-    else echo "daily / weekly / monthly / custom"; read sched; fi
+    if ! yesno "Cron Schedule" "Do you want LWSBackup to run automatically from cron?"; then
+        remove_cron_job
+        msgbox "Cron" "Automatic cron job removed/disabled."
+        return
+    fi
+    if has_dialog; then
+        sched="$(dialog_cmd --title "Cron Schedule" --menu "Choose backup schedule:" 16 76 6 \
+            "daily" "Every day" \
+            "weekly" "Every week" \
+            "monthly" "Monthly on the 1st" \
+            "custom" "Enter custom cron expression" \
+            3>&1 1>&2 2>&3)"
+        rc=$?
+        clear_screen
+        [ $rc -eq 0 ] || return
+    else
+        echo "daily / weekly / monthly / custom"
+        read sched
+    fi
     if [ "$sched" = "custom" ]; then
         expr="$(inputbox "Custom Cron" "Enter full cron expression, example: 21 18 * * 5" "21 18 * * 5")" || return
     else
         hour="$(inputbox "Hour" "Hour in 24-hour format, 0-23:" "3")" || return
         minute="$(inputbox "Minute" "Minute, 0-59:" "0")" || return
-        if [ "$sched" = "daily" ]; then expr="$minute $hour * * *"; elif [ "$sched" = "monthly" ]; then expr="$minute $hour 1 * *"; else dow="$(inputbox "Day of Week" "0=Sunday through 6=Saturday:" "5")" || return; expr="$minute $hour * * $dow"; fi
+        case "$sched" in
+            daily) expr="$minute $hour * * *" ;;
+            monthly) expr="$minute $hour 1 * *" ;;
+            *)
+                dow="$(inputbox "Day of Week" "0=Sunday through 6=Saturday:" "5")" || return
+                expr="$minute $hour * * $dow"
+                ;;
+        esac
     fi
-    add_cron_job "$expr"; msgbox "Cron Saved" "Cron job saved:\n\n$expr /usr/local/sbin/lws-backup --run"
+    add_cron_job "$expr"
+    msgbox "Cron Saved" "Cron job saved:\n\n$expr /usr/local/sbin/lws-backup --run"
 }
 
 configure_general_menu() {
@@ -995,26 +1085,102 @@ list_profile_names() {
 profiles_menu() {
     while true; do
         load_config
-        if check_dialog; then
-            setup_dialog_theme
-            choice="$(dialog_cmd --title "Profiles" --menu "Active profile: $ACTIVE_PROFILE\n\nProfiles are saved target/config snapshots." 18 78 7 "1" "Save current config as profile" "2" "Load profile" "3" "List profiles" "0" "Back" 3>&1 1>&2 2>&3)"
-            rc=$?; clear_screen; [ $rc -eq 0 ] || return
-        else echo "1) Save profile  2) Load profile  3) List profiles  0) Back"; read choice; fi
+        if has_dialog; then
+            choice="$(dialog_cmd --title "Profiles" --menu "Active profile: $ACTIVE_PROFILE\n\nProfiles are saved target/config snapshots." 18 78 7 \
+                "1" "Save current config as profile" \
+                "2" "Load profile" \
+                "3" "List profiles" \
+                "0" "Back" \
+                3>&1 1>&2 2>&3)"
+            rc=$?
+            clear_screen
+            [ $rc -eq 0 ] || return
+        else
+            echo "1) Save profile  2) Load profile  3) List profiles  0) Back"
+            read choice
+        fi
         case "$choice" in
-            1) name="$(inputbox "Save Profile" "Profile name:" "$HOSTNAME")" || continue; name="$(sanitize_name "$name")"; [ -z "$name" ] && continue; mkdir -p "$PROFILE_DIR/$name"; cp -f "$CONFIG_FILE" "$PROFILE_DIR/$name/lwsbackup.conf" 2>/dev/null; cp -f "$TARGETS_FILE" "$PROFILE_DIR/$name/targets.conf" 2>/dev/null; cp -f "$FTP_FILE" "$PROFILE_DIR/$name/ftp.conf" 2>/dev/null; ACTIVE_PROFILE="$name"; save_config; msgbox "Profile Saved" "Profile saved: $name" ;;
-            2) names="$(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)"; [ -z "$names" ] && { msgbox "Profiles" "No profiles found."; continue; }; name="$(inputbox "Load Profile" "Enter profile name:\n\n$names" "$ACTIVE_PROFILE")" || continue; [ -d "$PROFILE_DIR/$name" ] || { msgbox "Profiles" "Profile not found: $name"; continue; }; cp -f "$PROFILE_DIR/$name/lwsbackup.conf" "$CONFIG_FILE" 2>/dev/null; cp -f "$PROFILE_DIR/$name/targets.conf" "$TARGETS_FILE" 2>/dev/null; cp -f "$PROFILE_DIR/$name/ftp.conf" "$FTP_FILE" 2>/dev/null; ACTIVE_PROFILE="$name"; save_config; msgbox "Profile Loaded" "Loaded profile: $name" ;;
-            3) list="$(find "$PROFILE_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null)"; [ -z "$list" ] && list="No profiles found."; msgbox "Profiles" "$list" ;;
+            1)
+                name="$(inputbox "Save Profile" "Profile name:" "$HOSTNAME")" || continue
+                name="$(sanitize_name "$name")"
+                [ -z "$name" ] && continue
+                mkdir -p "$PROFILE_DIR/$name"
+                cp -f "$CONFIG_FILE" "$PROFILE_DIR/$name/lwsbackup.conf" 2>/dev/null
+                cp -f "$TARGETS_FILE" "$PROFILE_DIR/$name/targets.conf" 2>/dev/null
+                cp -f "$FTP_FILE" "$PROFILE_DIR/$name/ftp.conf" 2>/dev/null
+                ACTIVE_PROFILE="$name"
+                save_config
+                msgbox "Profile Saved" "Profile saved: $name"
+                ;;
+            2)
+                names="$(list_profile_names)"
+                [ -z "$names" ] && { msgbox "Profiles" "No profiles found."; continue; }
+                name="$(inputbox "Load Profile" "Enter profile name:\n\n$names" "$ACTIVE_PROFILE")" || continue
+                [ -d "$PROFILE_DIR/$name" ] || { msgbox "Profiles" "Profile not found: $name"; continue; }
+                cp -f "$PROFILE_DIR/$name/lwsbackup.conf" "$CONFIG_FILE" 2>/dev/null
+                cp -f "$PROFILE_DIR/$name/targets.conf" "$TARGETS_FILE" 2>/dev/null
+                cp -f "$PROFILE_DIR/$name/ftp.conf" "$FTP_FILE" 2>/dev/null
+                ACTIVE_PROFILE="$name"
+                save_config
+                msgbox "Profile Loaded" "Loaded profile: $name"
+                ;;
+            3)
+                list="$(list_profile_names)"
+                [ -z "$list" ] && list="No profiles found."
+                msgbox "Profiles" "$list"
+                ;;
             0) return ;;
         esac
     done
 }
 
+run_restore_script() {
+    script="$1"
+    check_root
+    if yesno "Dry Run" "Run restore in dry-run mode first?"; then
+        if ! "$script" --dry-run; then
+            msgbox "Restore" "Dry-run failed. Live restore was NOT started."
+            return 1
+        fi
+        if ! yesno "Continue Restore" "Dry-run finished.\n\nProceed with live restore?"; then
+            return 0
+        fi
+    fi
+    if ! "$script"; then
+        msgbox "Restore" "Restore failed. Check restore.log in the kit folder."
+        return 1
+    fi
+    return 0
+}
+
+find_restore_script_in_tree() {
+    base="$1"
+    find "$base" -maxdepth 3 -name restore.sh -type f -executable 2>/dev/null | head -n 1
+}
+
 restore_local_menu() {
-    kit="$(inputbox "Restore Kit" "Enter path to Restore_kit zip or extracted Restore_kit folder:" "$RESTORE_KIT_DIR/Restore_kit_latest.zip")" || return
-    if [ -d "$kit" ] && [ -x "$kit/restore.sh" ]; then yesno "Dry Run" "Run restore in dry-run mode first?" && "$kit/restore.sh" --dry-run || "$kit/restore.sh"; pause_text; return; fi
+    check_root
+    create_folders
+    initialize_defaults
+    init_ui
+    build_names
+    kit="$(inputbox "Restore Kit" "Enter path to restore kit zip or extracted folder:" "$LATEST_RESTORE_KIT_FILE")" || return
+    if [ -d "$kit" ] && [ -x "$kit/restore.sh" ]; then
+        run_restore_script "$kit/restore.sh"
+        pause_text
+        return
+    fi
     if [ -f "$kit" ]; then
-        tmprestore="$TMP_DIR/manual_restore_${DATESTAMP}"; mkdir -p "$tmprestore"; unzip -q "$kit" -d "$tmprestore" || { msgbox "Restore" "Could not unzip restore kit."; return; }
-        if [ -x "$tmprestore/Restore_kit/restore.sh" ]; then yesno "Dry Run" "Run restore in dry-run mode first?" && "$tmprestore/Restore_kit/restore.sh" --dry-run || "$tmprestore/Restore_kit/restore.sh"; pause_text; else msgbox "Restore" "restore.sh was not found in that kit."; fi
+        tmprestore="$TMP_DIR/manual_restore_$(date +%Y%m%d-%H%M%S)"
+        mkdir -p "$tmprestore"
+        unzip -q "$kit" -d "$tmprestore" || { msgbox "Restore" "Could not unzip restore kit."; return; }
+        script="$(find_restore_script_in_tree "$tmprestore")"
+        if [ -n "$script" ]; then
+            run_restore_script "$script"
+            pause_text
+        else
+            msgbox "Restore" "restore.sh was not found in that kit."
+        fi
         return
     fi
     msgbox "Restore" "File/folder not found:\n$kit"
@@ -1022,38 +1188,93 @@ restore_local_menu() {
 
 install_self() {
     create_folders
-
-    # When the script is launched from the installed symlink, $0 may be
-    # /usr/local/sbin/lws-backup, which already points to $SELF_SCRIPT.
-    # Do not try to copy the symlink back onto its own target, because cp
-    # can fail with a "same file" style error on some systems.
     case "$0" in
         "$SELF_SCRIPT"|/usr/local/sbin/lws-backup|/usr/local/bin/lws-backup)
-            if [ ! -f "$SELF_SCRIPT" ]; then
-                fail_exit "Installed script is missing: $SELF_SCRIPT"
-            fi
+            [ -f "$SELF_SCRIPT" ] || fail_exit "Installed script is missing: $SELF_SCRIPT"
             ;;
         *)
             cp -f "$0" "$SELF_SCRIPT" 2>/dev/null || fail_exit "Could not copy script to $SELF_SCRIPT"
             ;;
     esac
-
     chmod +x "$SELF_SCRIPT" 2>/dev/null || fail_exit "Could not make $SELF_SCRIPT executable"
-
     ln -sf "$SELF_SCRIPT" /usr/local/sbin/lws-backup || fail_exit "Could not create symlink /usr/local/sbin/lws-backup"
     mkdir -p /usr/local/bin 2>/dev/null
     ln -sf "$SELF_SCRIPT" /usr/local/bin/lws-backup 2>/dev/null
-
     echo_log "Installed/symlinked: /usr/local/sbin/lws-backup"
 }
 
-install_mode() {
+prepare_interactive_session() {
+    [ "$SESSION_PREPARED" -eq 1 ] && return 0
     check_root
     create_folders
     initialize_defaults
-    check_commands_core
-    install_dialog_if_possible
+    ensure_command_optional dialog dialog || true
+    init_ui
     install_self
+    SESSION_PREPARED=1
+}
+
+handle_menu_choice() {
+    case "$1" in
+        1) run_backup_job; pause_text ;;
+        2) configure_general_menu ;;
+        3) configure_targets_menu ;;
+        4) configure_ftp_menu ;;
+        5) configure_cron_menu ;;
+        6) restore_local_menu ;;
+        7) view_logs_menu ;;
+        8) profiles_menu ;;
+        9) run_setup_wizard ;;
+        0) return 1 ;;
+    esac
+    return 0
+}
+
+run_menu_loop() {
+    while true; do
+        load_config
+        if has_dialog; then
+            choice="$(dialog_cmd --title "LWSBackup v$VERSION" --menu "Host: $HOSTNAME\nRoot: $LWS_ROOT\nProfile: $ACTIVE_PROFILE\nFTP: $FTP_ENABLED\n\nChoose an option:" 22 76 12 \
+                "1" "Run Backup Now" \
+                "2" "General Settings" \
+                "3" "Backup Targets" \
+                "4" "FTP Settings" \
+                "5" "Cron Schedule" \
+                "6" "Restore From Restore Kit" \
+                "7" "View Latest Log" \
+                "8" "Profiles" \
+                "9" "Run First-Time Setup Wizard" \
+                "0" "Exit" \
+                3>&1 1>&2 2>&3)"
+            rc=$?
+            clear_screen
+            [ $rc -eq 0 ] || break
+        else
+            clear_screen
+            echo "LWSBackup v$VERSION"
+            echo "Host: $HOSTNAME"
+            echo
+            echo "1) Run Backup Now"
+            echo "2) General Settings"
+            echo "3) Backup Targets"
+            echo "4) FTP Settings"
+            echo "5) Cron Schedule"
+            echo "6) Restore From Restore Kit"
+            echo "7) View Latest Log"
+            echo "8) Profiles"
+            echo "9) First-Time Setup Wizard"
+            echo "0) Exit"
+            echo
+            printf "Choice: "
+            read choice
+        fi
+        handle_menu_choice "$choice" || break
+    done
+}
+
+install_mode() {
+    prepare_interactive_session
+    check_commands_core
 
     echo
     echo "LWSBackup v$VERSION installed."
@@ -1063,7 +1284,7 @@ install_mode() {
 
     if [ -t 0 ]; then
         if yesno "LWSBackup Install" "Install complete. Run the first-time setup wizard now?"; then
-            first_run_setup
+            run_setup_wizard
         else
             msgbox "Install Complete" "Install complete.
 
@@ -1128,43 +1349,14 @@ run_setup_wizard() {
 }
 
 first_run_setup() {
-    check_root; create_folders; initialize_defaults; install_dialog_if_possible; install_self
-    msgbox "LWSBackup v$VERSION" "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
-    configure_general_menu
-    if yesno "Default Targets" "Install default HamVOIP/AllStar targets?\n\n/srv/http\n/etc/asterisk\n/var/spool/cron/root\n\nIf No, add targets manually later."; then
-        create_legacy_default_targets
-    fi
-    if yesno "Backup Targets" "Do you want to add more custom folders or files now?"; then
-        configure_targets_menu
-    fi
-    yesno "FTP" "Do you want to configure FTP upload now?\n\nIf skipped, FTP remains disabled but the template config stays available." && configure_ftp_menu || { FTP_ENABLED="no"; save_ftp_config; }
-    yesno "Cron" "Do you want to create an automatic cron schedule now?" && configure_cron_menu
-    msgbox "Setup Complete" "Setup is complete.\n\nRun now:\n/usr/local/sbin/lws-backup --run\n\nOpen menu:\n/usr/local/sbin/lws-backup --menu"
+    prepare_interactive_session
+    run_setup_wizard
 }
 
 main_menu() {
-    check_root; create_folders; initialize_defaults; install_dialog_if_possible; install_self
-    if ! check_dialog; then text_menu; return; fi
-    while true; do
-        load_config; setup_dialog_theme
-        choice="$(dialog_cmd --title "LWSBackup v$VERSION" --menu "Host: $HOSTNAME\nRoot: $LWS_ROOT\nProfile: $ACTIVE_PROFILE\nFTP: $FTP_ENABLED\n\nChoose an option:" 22 76 12 \
-            "1" "Run Backup Now" "2" "General Settings" "3" "Backup Targets" "4" "FTP Settings" "5" "Cron Schedule" "6" "Restore From Restore Kit" "7" "View Latest Log" "8" "Profiles" "9" "Run First-Time Setup Wizard" "0" "Exit" \
-            3>&1 1>&2 2>&3)"
-        rc=$?; clear_screen; [ $rc -eq 0 ] || break
-        case "$choice" in
-            1) run_backup_job; pause_text ;; 2) configure_general_menu ;; 3) configure_targets_menu ;; 4) configure_ftp_menu ;; 5) configure_cron_menu ;; 6) restore_local_menu ;; 7) view_logs_menu ;; 8) profiles_menu ;; 9) first_run_setup ;; 0) break ;;
-        esac
-    done
+    prepare_interactive_session
+    run_menu_loop
     cleanup
-}
-
-text_menu() {
-    while true; do
-        clear_screen; echo "LWSBackup v$VERSION"; echo "Host: $HOSTNAME"; echo; echo "1) Run Backup Now"; echo "2) General Settings"; echo "3) Backup Targets"; echo "4) FTP Settings"; echo "5) Cron Schedule"; echo "6) Restore From Restore Kit"; echo "7) View Latest Log"; echo "8) Profiles"; echo "9) First-Time Setup Wizard"; echo "0) Exit"; echo; printf "Choice: "; read choice
-        case "$choice" in
-            1) run_backup_job; pause_text ;; 2) configure_general_menu ;; 3) configure_targets_menu ;; 4) configure_ftp_menu ;; 5) configure_cron_menu ;; 6) restore_local_menu ;; 7) view_logs_menu ;; 8) profiles_menu ;; 9) first_run_setup ;; 0) break ;;
-        esac
-    done
 }
 
 usage() {
@@ -1198,8 +1390,18 @@ main() {
         --menu) main_menu ;;
         --restore) restore_local_menu ;;
         --help|-h) usage ;;
-        "") if [ -t 0 ]; then main_menu; else run_backup_job; fi ;;
-        *) echo "Unknown option: $1"; usage; exit 1 ;;
+        "")
+            if [ -t 0 ]; then
+                main_menu
+            else
+                run_backup_job
+            fi
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
     esac
 }
 
