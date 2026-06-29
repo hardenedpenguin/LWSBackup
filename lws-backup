@@ -1,0 +1,3 @@
+#!/bin/bash
+# Repo-root wrapper — runs the modular LWSBackup entrypoint (same name as the installed command).
+exec "$(cd "$(dirname "$0")" && pwd)/scripts/lws-backup" "$@"
