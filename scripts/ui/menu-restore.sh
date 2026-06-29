@@ -24,10 +24,7 @@ find_restore_script_in_tree() {
 }
 
 restore_local_menu() {
-    check_root
-    create_folders
-    initialize_defaults
-    init_ui
+    session_prepare_minimal
     build_names
     kit="$(inputbox "Restore Kit" "Enter path to restore kit zip or extracted folder:" "$LATEST_RESTORE_KIT_FILE")" || return
     if [ -d "$kit" ] && [ -x "$kit/restore.sh" ]; then

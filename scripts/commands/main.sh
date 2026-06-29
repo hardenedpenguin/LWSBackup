@@ -1,4 +1,8 @@
 # LWSBackup CLI entry helpers
+show_version() {
+    echo "LWSBackup $VERSION"
+}
+
 usage() {
     cat <<EOH
 LWSBackup v$VERSION
@@ -9,6 +13,7 @@ Usage:
   sudo $0 --setup       Run first-time setup wizard
   sudo $0 --run         Run backup immediately
   sudo $0 --restore     Restore from latest restore kit using menu prompt
+  sudo $0 --version     Show script version
   sudo $0 --help        Show this help
 
 No option opens menu when interactive, or runs backup when non-interactive.
@@ -29,6 +34,7 @@ main() {
         --setup) first_run_setup ;;
         --menu) main_menu ;;
         --restore) restore_local_menu ;;
+        --version|-V) show_version ;;
         --help|-h) usage ;;
         "")
             if [ -t 0 ]; then

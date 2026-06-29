@@ -3,6 +3,9 @@
 job_prepare() {
     check_root
     create_folders
+    if ! modular_scripts_ready; then
+        fail_exit "LWSBackup modular scripts are not available. Run: sudo lws-backup --install"
+    fi
     initialize_defaults
     refresh_job_paths
     make_lock

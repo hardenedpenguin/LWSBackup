@@ -6,11 +6,9 @@
 
 LWS_SCRIPT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-lws_source_dir() {
-    dir="$1"
-    [ -d "$dir" ] || return 0
+lws_source_files() {
     # shellcheck disable=SC1090
-    for f in "$dir"/*.sh; do
+    for f in "$@"; do
         [ -f "$f" ] || continue
         . "$f"
     done
@@ -18,9 +16,43 @@ lws_source_dir() {
 
 # shellcheck source=lib/00-bootstrap.sh
 . "$LWS_SCRIPT_ROOT/lib/00-bootstrap.sh"
-lws_source_dir "$LWS_SCRIPT_ROOT/lib"
-lws_source_dir "$LWS_SCRIPT_ROOT/ui"
-lws_source_dir "$LWS_SCRIPT_ROOT/commands"
+
+lws_source_files \
+    "$LWS_SCRIPT_ROOT/lib/01-version.sh" \
+    "$LWS_SCRIPT_ROOT/lib/02-paths.sh" \
+    "$LWS_SCRIPT_ROOT/lib/03-log.sh" \
+    "$LWS_SCRIPT_ROOT/lib/04-util.sh" \
+    "$LWS_SCRIPT_ROOT/lib/05-lock.sh" \
+    "$LWS_SCRIPT_ROOT/lib/06-config.sh" \
+    "$LWS_SCRIPT_ROOT/lib/07-deps.sh" \
+    "$LWS_SCRIPT_ROOT/lib/08-targets.sh" \
+    "$LWS_SCRIPT_ROOT/lib/09-names.sh" \
+    "$LWS_SCRIPT_ROOT/lib/10-backup.sh" \
+    "$LWS_SCRIPT_ROOT/lib/11-restore-kit.sh" \
+    "$LWS_SCRIPT_ROOT/lib/12-verify.sh" \
+    "$LWS_SCRIPT_ROOT/lib/13-ftp.sh" \
+    "$LWS_SCRIPT_ROOT/lib/14-retention.sh" \
+    "$LWS_SCRIPT_ROOT/lib/15-cron.sh" \
+    "$LWS_SCRIPT_ROOT/lib/16-profiles.sh" \
+    "$LWS_SCRIPT_ROOT/lib/17-install.sh" \
+    "$LWS_SCRIPT_ROOT/lib/18-job.sh"
+
+lws_source_files \
+    "$LWS_SCRIPT_ROOT/ui/dialog.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-general.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-targets.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-ftp.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-cron.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-logs.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-profiles.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu-restore.sh" \
+    "$LWS_SCRIPT_ROOT/ui/menu.sh"
+
+lws_source_files \
+    "$LWS_SCRIPT_ROOT/commands/install.sh" \
+    "$LWS_SCRIPT_ROOT/commands/setup.sh" \
+    "$LWS_SCRIPT_ROOT/commands/menu.sh" \
+    "$LWS_SCRIPT_ROOT/commands/main.sh"
 
 trap cleanup EXIT INT TERM
 main "$@"

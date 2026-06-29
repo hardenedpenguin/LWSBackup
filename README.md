@@ -20,9 +20,8 @@ Instead of manually opening SSH sessions and downloading backup archives, LWSBac
 - Linux Mint
 - Most Debian-based Linux distributions
 - Should work in other Linux Systems you will have to try.
-  
-#
-Optional HamVOIP / AllStarLink default targets (offered during `lws-backup --setup`, not applied automatically):
+
+### Optional default targets (Linux script)
 
 | Type      | Path                   | Purpose                                                 |
 | --------- | ---------------------- | ------------------------------------------------------- |
@@ -32,9 +31,9 @@ Optional HamVOIP / AllStarLink default targets (offered during `lws-backup --set
 
 New installs start with an empty `targets.conf` until you run setup or add targets from the menu. Existing systems that already have targets are not changed.
 
-V1.0.4 UPDATE
+> **Note:** LWSBackup Desktop releases use their own version (for example v1.0.4). The Linux `lws-backup` script version is separate (currently v17).
 
-# Backup Targets
+## Backup Targets
 
 LWSBackup now supports custom backup targets.
 
@@ -86,9 +85,12 @@ From here you can:
 - Save target selections
 
 This allows backups to include files and directories beyond the default LWSBackup configuration.
+
+---
+
 # LWSBackup Manual Usage Guide
 
-Install and run this program first, it will install all necesary files and settings into your Pi. Then if you like you can run manual commands from terminal'
+Install and run this program first; it will install all necessary files and settings on your Pi. You can then run manual commands from the terminal if you prefer.
 
 This guide covers manual operation of LWSBackup directly from a Linux terminal.
 
@@ -119,6 +121,18 @@ Expected output:
 /usr/local/sbin/lws-backup
 ```
 
+### Install from a git checkout
+
+On the Linux node (or from a copy of this repository):
+
+```bash
+git clone https://github.com/hardenedpenguin/LWSBackup.git
+cd LWSBackup
+sudo ./lws-backup --install
+```
+
+This copies the modular script tree to `/LWS_Backup/scripts` and creates the `lws-backup` command. Run `sudo lws-backup --install` again anytime to repair or upgrade the installed scripts.
+
 ---
 
 # Command Line Options
@@ -129,6 +143,12 @@ Show available options and usage information:
 
 ```bash
 lws-backup --help
+```
+
+Show the script version:
+
+```bash
+lws-backup --version
 ```
 
 ---
@@ -425,6 +445,12 @@ Display help:
 lws-backup --help
 ```
 
+Show version:
+
+```bash
+lws-backup --version
+```
+
 Reinstall or repair:
 
 ```bash
@@ -676,6 +702,28 @@ The Linux `lws-backup` script includes:
 * Safer restore flow (dry-run failure does not trigger live restore)
 * Dynamic restore kit folder naming inside the zip
 * FTP delete-local-after-upload option (off by default)
+
+## Development
+
+Repository layout:
+
+```text
+lws-backup              # repo-root wrapper (same name as installed command)
+scripts/lws-backup      # modular entrypoint
+scripts/lib/            # core logic (no dialog UI)
+scripts/ui/             # menus and dialog helpers
+scripts/commands/       # CLI handlers (--run, --menu, etc.)
+scripts/templates/      # restore.sh template for restore kits
+tests/                  # bats unit tests
+```
+
+Run tests locally (requires [bats](https://github.com/bats-core/bats-core)):
+
+```bash
+tests/run.sh
+```
+
+CI runs ShellCheck on all shell scripts and bats on every push to `main`.
 
 ## Author
 
