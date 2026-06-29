@@ -1,0 +1,26 @@
+#!/bin/bash
+# LWS Backup v17 — modular entrypoint
+# WROG208 / N4ASS
+# Designed for HamVoIP / Arch Linux ARM / Debian / Raspberry Pi / AllStar-style nodes.
+# Bash 4.x compatible. No Python required.
+
+LWS_SCRIPT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+lws_source_dir() {
+    dir="$1"
+    [ -d "$dir" ] || return 0
+    # shellcheck disable=SC1090
+    for f in "$dir"/*.sh; do
+        [ -f "$f" ] || continue
+        . "$f"
+    done
+}
+
+# shellcheck source=lib/00-bootstrap.sh
+. "$LWS_SCRIPT_ROOT/lib/00-bootstrap.sh"
+lws_source_dir "$LWS_SCRIPT_ROOT/lib"
+lws_source_dir "$LWS_SCRIPT_ROOT/ui"
+lws_source_dir "$LWS_SCRIPT_ROOT/commands"
+
+trap cleanup EXIT INT TERM
+main "$@"
