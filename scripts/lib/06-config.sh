@@ -58,8 +58,3 @@ initialize_defaults() {
     [ -f "$FTP_FILE" ] || ftp_save
     targets_ensure_file
 }
-
-# Backward-compatible aliases used across the codebase.
-load_config() { config_load; }
-save_config() { config_save; }
-save_ftp_config() { ftp_save; }

@@ -142,14 +142,3 @@ targets_remove_by_index() {
     mv "$tmp" "$TARGETS_FILE"
     chmod 600 "$TARGETS_FILE"
 }
-
-# Backward-compatible aliases.
-create_empty_targets_if_missing() { targets_ensure_file; }
-create_legacy_default_targets() { targets_apply_legacy_defaults; }
-list_targets_text() { targets_list_text; }
-list_targets_for_removal() { targets_list_for_removal; }
-count_targets() { targets_count; }
-target_exists() { targets_exists "$@"; }
-zipname_exists() { targets_zipname_exists "$@"; }
-remove_target_by_index() { targets_remove_by_index "$@"; }
-add_target() { targets_add "$@"; }

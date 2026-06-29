@@ -1,7 +1,7 @@
 # LWSBackup profiles menu
 profiles_menu() {
     while true; do
-        load_config
+        config_load
         if has_dialog; then
             choice="$(dialog_cmd --title "Profiles" --menu "Active profile: $ACTIVE_PROFILE\n\nProfiles are saved target/config snapshots." 18 78 7 \
                 "1" "Save current config as profile" \
@@ -26,7 +26,7 @@ profiles_menu() {
                 cp -f "$TARGETS_FILE" "$PROFILE_DIR/$name/targets.conf" 2>/dev/null
                 cp -f "$FTP_FILE" "$PROFILE_DIR/$name/ftp.conf" 2>/dev/null
                 ACTIVE_PROFILE="$name"
-                save_config
+                config_save
                 msgbox "Profile Saved" "Profile saved: $name"
                 ;;
             2)
@@ -38,7 +38,7 @@ profiles_menu() {
                 cp -f "$PROFILE_DIR/$name/targets.conf" "$TARGETS_FILE" 2>/dev/null
                 cp -f "$PROFILE_DIR/$name/ftp.conf" "$FTP_FILE" 2>/dev/null
                 ACTIVE_PROFILE="$name"
-                save_config
+                config_save
                 msgbox "Profile Loaded" "Loaded profile: $name"
                 ;;
             3)

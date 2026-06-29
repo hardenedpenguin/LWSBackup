@@ -698,6 +698,7 @@ The Linux `lws-backup` script includes:
 
 * Optional HamVOIP/AllStar defaults during setup (no longer forced on new installs)
 * Remove individual backup targets from the Linux menu
+* Canonical `config_*` and `targets_*` APIs (legacy aliases removed)
 * Configurable backup and restore kit ZIP prefixes
 * Safer restore flow (dry-run failure does not trigger live restore)
 * Dynamic restore kit folder naming inside the zip
@@ -724,6 +725,8 @@ tests/run.sh
 ```
 
 CI runs ShellCheck on all shell scripts and bats on every push to `main`.
+
+See [CHANGELOG.md](CHANGELOG.md) for script release notes.
 
 ## Author
 

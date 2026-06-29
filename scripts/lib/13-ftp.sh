@@ -1,6 +1,6 @@
 # LWSBackup FTP upload
 upload_ftp() {
-    load_config
+    config_load
     sanitize_runtime_settings
     [ "$FTP_ENABLED" != "yes" ] && { echo_log "FTP disabled. Skipping upload."; return 0; }
     check_commands_optional

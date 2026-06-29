@@ -53,7 +53,7 @@ check_commands_core() {
 }
 
 check_commands_optional() {
-    load_config
+    config_load
     if [ "$FTP_ENABLED" = "yes" ]; then
         ensure_command curl curl
     fi

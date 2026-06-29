@@ -17,7 +17,7 @@ handle_menu_choice() {
 
 run_menu_loop() {
     while true; do
-        load_config
+        config_load
         if has_dialog; then
             choice="$(dialog_cmd --title "LWSBackup v$VERSION" --menu "Host: $HOSTNAME\nRoot: $LWS_ROOT\nProfile: $ACTIVE_PROFILE\nFTP: $FTP_ENABLED\n\nChoose an option:" 22 76 12 \
                 "1" "Run Backup Now" \

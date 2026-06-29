@@ -1,5 +1,6 @@
 # LWSBackup retention cleanup
 cleanup_old_files() {
+    config_load
     build_names
     echo_log "Cleaning old backups, restore kits, and logs..."
     find "$BACKUP_DIR" -name "*.zip" ! -name "$LATEST_BACKUP_NAME" -type f | sort | head -n -"$MAX_BACKUPS" | xargs -r rm --

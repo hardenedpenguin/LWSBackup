@@ -1,5 +1,6 @@
 # LWSBackup general settings menu
 configure_general_menu() {
+    config_load
     old_backup_prefix="$BACKUP_PREFIX"
     old_restore_prefix="$RESTORE_KIT_PREFIX"
     newprefix="$(inputbox "Backup Name Prefix" "Backup ZIP prefix. Timestamp and hostname are added automatically:" "$BACKUP_PREFIX")" || return
@@ -16,6 +17,6 @@ configure_general_menu() {
     if [ "$RESTORE_KIT_PREFIX" != "$old_restore_prefix" ]; then
         rm -f "$RESTORE_KIT_DIR/${old_restore_prefix}_latest.zip"
     fi
-    save_config
+    config_save
     msgbox "Settings Saved" "Settings saved."
 }

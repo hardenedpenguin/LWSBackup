@@ -3,7 +3,7 @@ run_setup_wizard() {
     msgbox "LWSBackup v$VERSION" "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
     configure_general_menu
     if yesno "Default Targets" "Install default HamVOIP/AllStar targets?\n\n/srv/http\n/etc/asterisk\n/var/spool/cron/root\n\nIf No, add targets manually later."; then
-        create_legacy_default_targets
+        targets_apply_legacy_defaults
     fi
     if yesno "Backup Targets" "Do you want to add more custom folders or files now?"; then
         configure_targets_menu
@@ -12,7 +12,7 @@ run_setup_wizard() {
         configure_ftp_menu
     else
         FTP_ENABLED="no"
-        save_ftp_config
+        ftp_save
     fi
     if yesno "Cron" "Do you want to create an automatic cron schedule now?"; then
         configure_cron_menu
