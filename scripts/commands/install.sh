@@ -1,5 +1,6 @@
 # LWSBackup --install
 install_mode() {
+    prepare_interactive_session
     check_commands_core
 
     echo

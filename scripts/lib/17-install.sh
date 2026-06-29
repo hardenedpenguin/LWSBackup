@@ -42,6 +42,7 @@ install_self() {
 }
 
 prepare_interactive_session() {
+    # Dialog, install, and config bootstrap for --menu, --install, and --setup.
     [ "$SESSION_PREPARED" -eq 1 ] && return 0
     check_root
     create_folders

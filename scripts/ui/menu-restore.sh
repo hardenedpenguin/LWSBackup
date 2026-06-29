@@ -1,5 +1,6 @@
 # LWSBackup restore from kit menu
 run_restore_script() {
+    script="$1"
     check_root
     if yesno "Dry Run" "Run restore in dry-run mode first?"; then
         if ! "$script" --dry-run; then

@@ -1,5 +1,6 @@
 # LWSBackup --setup / setup wizard
-run_setup_wizard() { "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
+run_setup_wizard() {
+    msgbox "LWSBackup v$VERSION" "Welcome to LWSBackup setup.\n\nThe script will use /LWS_Backup for backups, restore kits, logs, scripts, config, and temporary files."
     configure_general_menu
     if yesno "Default Targets" "Install default HamVOIP/AllStar targets?\n\n/srv/http\n/etc/asterisk\n/var/spool/cron/root\n\nIf No, add targets manually later."; then
         create_legacy_default_targets
