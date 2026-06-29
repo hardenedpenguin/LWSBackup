@@ -1,5 +1,6 @@
 # LWSBackup configuration load/save
-load_config() {
+
+config_load() {
     script_version="$VERSION"
     [ -f "$CONFIG_FILE" ] && . "$CONFIG_FILE"
     [ -f "$FTP_FILE" ] && . "$FTP_FILE"
@@ -7,7 +8,7 @@ load_config() {
     sanitize_runtime_settings
 }
 
-save_config() {
+config_save() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" <<EOC
 # LWSBackup configuration
@@ -32,7 +33,7 @@ normalize_ftp_remote_dir() {
     esac
 }
 
-save_ftp_config() {
+ftp_save() {
     mkdir -p "$CONFIG_DIR"
     FTP_REMOTE_DIR="$(normalize_ftp_remote_dir "${FTP_REMOTE_DIR:-/}")"
     cat > "$FTP_FILE" <<EOC
@@ -49,35 +50,16 @@ EOC
     chmod 600 "$FTP_FILE"
 }
 
-create_empty_targets_if_missing() {
-    if [ ! -f "$TARGETS_FILE" ]; then
-        cat > "$TARGETS_FILE" <<'EOT'
-# LWSBackup target list
-# Format: TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
-# TYPE: DIR or FILE
-# Add targets from: sudo lws-backup --menu -> Backup Targets
-EOT
-        chmod 600 "$TARGETS_FILE"
-    fi
-}
-
-create_legacy_default_targets() {
-    cat > "$TARGETS_FILE" <<'EOT'
-# LWSBackup target list
-# Format: TYPE|SOURCE|ZIP_NAME|RESTORE_DESTINATION
-# TYPE: DIR or FILE
-DIR|/srv/http|HTTP|/srv/http
-DIR|/etc/asterisk|Asterisk|/etc/asterisk
-FILE|/var/spool/cron/root|root|/var/spool/cron/root
-EOT
-    chmod 600 "$TARGETS_FILE"
-}
-
 initialize_defaults() {
     create_folders
-    load_config
+    config_load
     sanitize_runtime_settings
-    [ -f "$CONFIG_FILE" ] || save_config
-    [ -f "$FTP_FILE" ] || save_ftp_config
-    create_empty_targets_if_missing
+    [ -f "$CONFIG_FILE" ] || config_save
+    [ -f "$FTP_FILE" ] || ftp_save
+    targets_ensure_file
 }
+
+# Backward-compatible aliases used across the codebase.
+load_config() { config_load; }
+save_config() { config_save; }
+save_ftp_config() { ftp_save; }

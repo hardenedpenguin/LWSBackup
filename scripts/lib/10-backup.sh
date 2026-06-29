@@ -56,7 +56,7 @@ backup_targets() {
     echo_log "Creating backup workspace..."
     mkdir -p "$WORK_DIR" || fail_exit "Could not create work directory"
     echo_log "Collecting backup targets..."
-    [ ! -f "$TARGETS_FILE" ] && create_empty_targets_if_missing
+    [ ! -f "$TARGETS_FILE" ] && targets_ensure_file
 
     while IFS='|' read -r type src zipname dest; do
         case "$type" in
