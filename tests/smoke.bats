@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "repo wrapper runs --help" {
     run "$BATS_TEST_DIRNAME/../lws-backup" --help
     [ "$status" -eq 0 ]

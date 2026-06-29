@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "normalize_ftp_remote_dir ensures trailing slash" {
     [ "$(normalize_ftp_remote_dir "/backups")" = "/backups/" ]
     [ "$(normalize_ftp_remote_dir "/backups/")" = "/backups/" ]

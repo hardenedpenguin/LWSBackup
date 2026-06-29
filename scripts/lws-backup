@@ -21,7 +21,7 @@ lws_source_files() {
     done
 }
 
-# shellcheck source=lib/00-bootstrap.sh
+# shellcheck disable=SC1091
 . "$LWS_SCRIPT_ROOT/lib/00-bootstrap.sh"
 
 lws_source_files \

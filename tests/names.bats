@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "build_names honors custom prefixes" {
     BACKUP_PREFIX="SiteBackup"
     RESTORE_KIT_PREFIX="SiteKit"

@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "restore template substitutes build-time placeholders" {
-    template="$LWS_SCRIPT_ROOT/templates/restore.sh"
+    template="$BATS_TEST_DIRNAME/../scripts/templates/restore.sh"
     output="$(sed \
         -e 's|@LWS_VERSION@|17|g' \
         -e 's|@KIT_BACKUP_PATH@|backups/SiteBackup_latest.zip|g' \

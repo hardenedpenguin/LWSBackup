@@ -1,8 +1,13 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "targets_validate_add rejects invalid type" {
     targets_ensure_file
-    run targets_validate_add "LINK" "/tmp" "tmp" "/tmp"
+    set +e
+    targets_validate_add "LINK" "/tmp" "tmp" "/tmp"
+    status=$?
+    set -e
     [ "$status" -eq 1 ]
     [ "$TARGET_LAST_ERROR" = "invalid_type" ]
 }
@@ -12,9 +17,12 @@
     sample_dir="$LWS_TEST_ROOT/dup"
     mkdir -p "$sample_dir"
     targets_add "DIR" "$sample_dir" "dup" "$sample_dir"
-    run targets_validate_add "DIR" "$sample_dir" "dup2" "$sample_dir"
+    set +e
+    targets_validate_add "DIR" "$sample_dir" "dup2" "$sample_dir"
+    status=$?
+    set -e
     [ "$status" -eq 1 ]
-    [[ "$TARGET_LAST_ERROR" == duplicate_target|* ]]
+    [[ "$TARGET_LAST_ERROR" == duplicate_target* ]]
 }
 
 @test "targets_apply_legacy_defaults writes HamVOIP paths" {

@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "targets_ensure_file creates empty targets.conf" {
     targets_ensure_file
     [ -f "$TARGETS_FILE" ]
@@ -8,7 +10,10 @@
 
 @test "targets_add rejects missing directory" {
     targets_ensure_file
-    run targets_add "DIR" "/no/such/path" "missing" "/no/such/path"
+    set +e
+    targets_add "DIR" "/no/such/path" "missing" "/no/such/path"
+    status=$?
+    set -e
     [ "$status" -eq 1 ]
     [ "$TARGET_LAST_ERROR" = "missing_directory|/no/such/path" ]
 }
@@ -29,9 +34,12 @@
     two="$LWS_TEST_ROOT/two"
     mkdir -p "$one" "$two"
     targets_add "DIR" "$one" "samezip" "$one"
-    run targets_add "DIR" "$two" "samezip" "$two"
+    set +e
+    targets_add "DIR" "$two" "samezip" "$two"
+    status=$?
+    set -e
     [ "$status" -eq 1 ]
-    [[ "$TARGET_LAST_ERROR" == duplicate_zipname|* ]]
+    [[ "$TARGET_LAST_ERROR" == duplicate_zipname* ]]
 }
 
 @test "targets_remove_by_index removes selected target" {

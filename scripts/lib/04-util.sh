@@ -32,15 +32,8 @@ sanitize_runtime_settings() {
     RESTORE_KIT_PREFIX="$(sanitize_name "$RESTORE_KIT_PREFIX")"
     ACTIVE_PROFILE="$(sanitize_name "$ACTIVE_PROFILE")"
 
-    # Repair leftover ANSI-clear contamination from older builds.
-    case "$BACKUP_PREFIX" in
-        *Backup*) BACKUP_PREFIX="Backup${BACKUP_PREFIX#*Backup}" ;;
-    esac
-    case "$RESTORE_KIT_PREFIX" in
-        *Restore_kit*) RESTORE_KIT_PREFIX="Restore_kit${RESTORE_KIT_PREFIX#*Restore_kit}" ;;
-    esac
-
     [ -z "$BACKUP_PREFIX" ] && BACKUP_PREFIX="Backup"
     [ -z "$RESTORE_KIT_PREFIX" ] && RESTORE_KIT_PREFIX="Restore_kit"
     [ -z "$ACTIVE_PROFILE" ] && ACTIVE_PROFILE="default"
+    return 0
 }

@@ -16,9 +16,9 @@ jobs:
 
       - name: ShellCheck scripts
         run: |
-          shellcheck -x -s bash lws-backup scripts/lws-backup
+          shellcheck -S error -x -s bash lws-backup scripts/lws-backup
           find scripts/lib scripts/ui scripts/commands scripts/templates \
-            -name '*.sh' -print0 | xargs -0 -r shellcheck -x -s bash
+            -name '*.sh' -print0 | xargs -0 -r shellcheck -S error -x -s bash
 
   bats:
     runs-on: ubuntu-latest

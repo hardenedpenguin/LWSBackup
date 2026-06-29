@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+load 'test_helper'
+
 @test "clean_number keeps digits and applies default" {
     [ "$(clean_number "abc12x3" 9)" = "123" ]
     [ "$(clean_number "" 7)" = "7" ]
