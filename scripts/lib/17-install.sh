@@ -20,7 +20,11 @@ install_script_tree() {
     cat > "$dest_root/lwsbackup.sh" <<'EOW'
 #!/bin/bash
 # Compatibility wrapper — delegates to modular lws-backup entrypoint.
-exec "$(cd "$(dirname "$0")" && pwd)/lws-backup" "$@"
+_entry="${BASH_SOURCE[0]}"
+if command -v readlink >/dev/null 2>&1; then
+    _entry="$(readlink -f "$_entry" 2>/dev/null || echo "$_entry")"
+fi
+exec "$(cd "$(dirname "$_entry")" && pwd)/lws-backup" "$@"
 EOW
     chmod +x "$dest_root/lwsbackup.sh"
 }

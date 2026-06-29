@@ -4,7 +4,14 @@
 # Designed for HamVoIP / Arch Linux ARM / Debian / Raspberry Pi / AllStar-style nodes.
 # Bash 4.x compatible. No Python required.
 
-LWS_SCRIPT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${LWS_SCRIPT_ROOT:-}" ]; then
+    _lws_entry="${BASH_SOURCE[0]}"
+    if command -v readlink >/dev/null 2>&1; then
+        _lws_entry="$(readlink -f "$_lws_entry" 2>/dev/null || echo "$_lws_entry")"
+    fi
+    LWS_SCRIPT_ROOT="$(cd "$(dirname "$_lws_entry")" && pwd)"
+fi
+unset _lws_entry
 
 lws_source_files() {
     # shellcheck disable=SC1090

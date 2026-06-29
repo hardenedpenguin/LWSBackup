@@ -37,6 +37,7 @@ Desktop app releases (for example v1.0.4) are versioned separately from the scri
 
 ### Fixed
 
+- Symlinked `/usr/local/sbin/lws-backup` now resolves `lib/` from `/LWS_Backup/scripts` (not `/usr/local/sbin`)
 - Per-run timestamps when backup is launched from a long-lived menu session
 - Backup fails clearly when no targets are copied
 - Setup wizard welcome dialog regression after modular split

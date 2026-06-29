@@ -12,3 +12,14 @@
     [ "$status" -eq 0 ]
     [ "$output" = "LWSBackup 17" ]
 }
+
+@test "entrypoint works when invoked through a symlink" {
+    root="$(mktemp -d "${BATS_TMPDIR:-/tmp}/lwsbackup-symlink.XXXXXX")"
+    mkdir -p "$root/sbin"
+    cp -a "$BATS_TEST_DIRNAME/../scripts" "$root/scripts"
+    ln -sf "$root/scripts/lws-backup" "$root/sbin/lws-backup"
+    run "$root/sbin/lws-backup" --version
+    [ "$status" -eq 0 ]
+    [ "$output" = "LWSBackup 17" ]
+    rm -rf "$root"
+}
